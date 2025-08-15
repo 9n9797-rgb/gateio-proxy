@@ -1,4 +1,4 @@
-flask
-requests
-python-dotenv
-certifi
+flask==3.0.3
+requests==2.32.3
+python-dotenv==1.0.1
+certifi==2025.6.15
