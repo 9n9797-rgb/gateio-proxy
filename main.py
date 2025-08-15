@@ -1,102 +1,39 @@
 from flask import Flask, request, jsonify
-import requests
-import time
-import hashlib
-import hmac
-import json
-import os
-from dotenv import load_dotenv
-import certifi
-
-load_dotenv()
 
 app = Flask(__name__)
 
-API_KEY = os.getenv("GATE_API_KEY")
-API_SECRET = os.getenv("GATE_API_SECRET")
-GATE_BASE_URL = "https://api.gate.io/api/v4"  # تأكد أنه مضبوط 100%
+GATE_BASE_URL = "https://api.gate.io/api/v4"
 
-def sign_request(method, url_path, query_string="", body=""):
-    t = str(int(time.time()))
-    to_sign = f"{t}\n{method.upper()}\n{url_path}\n{query_string}\n{body}"
-    sign = hmac.new(API_SECRET.encode(), to_sign.encode(), hashlib.sha512).hexdigest()
-    return {
-        "KEY": API_KEY,
-        "Timestamp": t,
-        "SIGN": sign
-    }
+@app.route("/proxy", methods=["GET"])
+def proxy():
+    endpoint = request.args.get("endpoint")
+    verify_ssl_param = str(request.args.get("verify_ssl", "false")).lower() == "true"
+
+    print("DEBUG - Raw endpoint:", endpoint)
+    print("DEBUG - GATE_BASE_URL:", GATE_BASE_URL)
+
+    if not endpoint or endpoint.strip() == "":
+        return jsonify({"error": "Missing or empty endpoint"}), 400
+
+    endpoint = endpoint.strip()
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+
+    full_url = f"{GATE_BASE_URL}{endpoint}"
+    print("DEBUG - Final full_url:", full_url)
+    print("DEBUG - Verify SSL:", verify_ssl_param)
+
+    return jsonify({
+        "raw_endpoint": endpoint,
+        "final_full_url": full_url,
+        "verify_ssl": verify_ssl_param
+    })
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({
-        "status": "ok",
-        "time": int(time.time())
-    }), 200
-
-@app.route("/proxy", methods=["GET", "POST"])
-def proxy():
-    try:
-        if request.method == "GET":
-            method = request.args.get("method", "GET").upper()
-            endpoint = request.args.get("endpoint")
-            params = {}
-            body = {}
-            verify_ssl_param = str(request.args.get("verify_ssl", "false")).lower() == "true"
-        else:
-            data = request.json if request.is_json else request.args
-            method = data.get("method", "GET").upper()
-            endpoint = data.get("endpoint")
-            params = json.loads(data.get("params", "{}")) if isinstance(data.get("params"), str) else data.get("params", {})
-            body = json.loads(data.get("body", "{}")) if isinstance(data.get("body"), str) else data.get("body", {})
-            verify_ssl_param = str(data.get("verify_ssl", "false")).lower() == "true"
-
-        # طباعة القيم للتشخيص
-        print("DEBUG - Raw endpoint:", endpoint)
-        print("DEBUG - GATE_BASE_URL:", GATE_BASE_URL)
-
-        if not endpoint or endpoint.strip() == "":
-            return jsonify({"error": "Missing or empty endpoint"}), 400
-
-        # تنظيف وضبط الـ endpoint
-        endpoint = endpoint.strip()
-        if not endpoint.startswith("/"):
-            endpoint = "/" + endpoint
-
-        # بناء الرابط النهائي
-        full_url = f"{GATE_BASE_URL}{endpoint}"
-        print("DEBUG - Final full_url:", full_url)
-
-        # اختيار التحقق من SSL
-        verify_option = certifi.where() if verify_ssl_param else False
-
-        # توقيع الطلب
-        url_path = endpoint
-        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-        body_str = json.dumps(body) if body else ""
-        headers = sign_request(method, url_path, query_string, body_str)
-
-        # إرسال الطلب
-        if method == "GET":
-            response = requests.get(full_url, headers=headers, params=params, timeout=10, verify=verify_option)
-        elif method == "POST":
-            response = requests.post(full_url, headers=headers, params=params, json=body, timeout=10, verify=verify_option)
-        else:
-            return jsonify({"error": "Unsupported method"}), 400
-
-        # إعادة النتيجة
-        try:
-            return jsonify(response.json()), response.status_code
-        except json.JSONDecodeError:
-            return jsonify({
-                "error": "Invalid JSON response from Gate.io",
-                "raw_response": response.text
-            }), 502
-
-    except requests.exceptions.SSLError as ssl_err:
-        return jsonify({"error": "SSL verification failed", "details": str(ssl_err)}), 502
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
+    import os
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
