@@ -40,18 +40,18 @@ def proxy():
         if request.method == "GET":
             method = request.args.get("method", "GET").upper()
             endpoint = request.args.get("endpoint")
-            params = {}  # يمكنك تعديلها إذا أردت دعم باراميترات إضافية
+            params = {}
             body = {}
-            verify_ssl_param = str(request.args.get("verify_ssl", "true")).lower() == "true"
+            # الوضع الافتراضي false إلا إذا كتب المستخدم true
+            verify_ssl_param = str(request.args.get("verify_ssl", "false")).lower() == "true"
         else:  # POST
             data = request.json if request.is_json else request.args
             method = data.get("method", "GET").upper()
             endpoint = data.get("endpoint")
             params = json.loads(data.get("params", "{}")) if isinstance(data.get("params"), str) else data.get("params", {})
             body = json.loads(data.get("body", "{}")) if isinstance(data.get("body"), str) else data.get("body", {})
-            verify_ssl_param = str(data.get("verify_ssl", "true")).lower() == "true"
+            verify_ssl_param = str(data.get("verify_ssl", "false")).lower() == "true"
 
-        # التحقق من وجود endpoint
         if not endpoint:
             return jsonify({"error": "Missing endpoint"}), 400
 
@@ -83,7 +83,6 @@ def proxy():
         else:
             return jsonify({"error": "Unsupported method"}), 400
 
-        # محاولة إرجاع JSON أو النص الخام
         try:
             return jsonify(response.json()), response.status_code
         except json.JSONDecodeError:
