@@ -25,14 +25,31 @@ def sign_request(method, url_path, query_string="", body=""):
         "SIGN": sign
     }
 
-@app.route("/proxy", methods=["POST"])
+# ✅ فحص صحة البروكسي
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "time": int(time.time())}), 200
+
+# ✅ استقبال GET أو POST وتمريره إلى Gate.io
+@app.route("/proxy", methods=["GET", "POST"])
 def proxy():
     try:
-        data = request.json
-        method = data.get("method", "GET")
-        endpoint = data.get("endpoint")
-        params = data.get("params", {})
-        body = data.get("body", {})
+        if request.method == "GET":
+            # مثال: /proxy?endpoint=/wallet/total_balance
+            endpoint = request.args.get("endpoint")
+            if not endpoint:
+                return jsonify({"error": "Missing endpoint"}), 400
+            params = dict(request.args)
+            params.pop("endpoint", None)
+            method = "GET"
+            body = {}
+        else:
+            data = request.json
+            method = data.get("method", "GET")
+            endpoint = data.get("endpoint")
+            params = data.get("params", {})
+            body = data.get("body", {})
+
         url_path = endpoint
         query_string = "&".join([f"{k}={v}" for k, v in params.items()])
         body_str = json.dumps(body) if body else ""
@@ -58,7 +75,6 @@ def proxy():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ السطر المهم لتشغيل التطبيق على Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
