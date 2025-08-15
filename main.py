@@ -36,15 +36,14 @@ def health():
 @app.route("/proxy", methods=["GET", "POST"])
 def proxy():
     try:
-        # قراءة البيانات بشكل منفصل حسب نوع الطلب
+        # قراءة البيانات
         if request.method == "GET":
             method = request.args.get("method", "GET").upper()
             endpoint = request.args.get("endpoint")
             params = {}
             body = {}
-            # الوضع الافتراضي false إلا إذا كتب المستخدم true
             verify_ssl_param = str(request.args.get("verify_ssl", "false")).lower() == "true"
-        else:  # POST
+        else:
             data = request.json if request.is_json else request.args
             method = data.get("method", "GET").upper()
             endpoint = data.get("endpoint")
@@ -55,8 +54,19 @@ def proxy():
         if not endpoint:
             return jsonify({"error": "Missing endpoint"}), 400
 
+        # تنظيف endpoint وضبطه
+        endpoint = endpoint.strip()
+        if not endpoint.startswith("/"):
+            endpoint = "/" + endpoint
+
+        # تحديد خيار SSL
         verify_option = certifi.where() if verify_ssl_param else False
 
+        # بناء الرابط النهائي
+        full_url = f"{GATE_BASE_URL}{endpoint}"
+        print(f"DEBUG - Requesting URL: {full_url}")
+
+        # توقيع الطلب
         url_path = endpoint
         query_string = "&".join([f"{k}={v}" for k, v in params.items()])
         body_str = json.dumps(body) if body else ""
@@ -64,22 +74,9 @@ def proxy():
 
         # إرسال الطلب
         if method == "GET":
-            response = requests.get(
-                f"{GATE_BASE_URL}{endpoint}",
-                headers=headers,
-                params=params,
-                timeout=10,
-                verify=verify_option
-            )
+            response = requests.get(full_url, headers=headers, params=params, timeout=10, verify=verify_option)
         elif method == "POST":
-            response = requests.post(
-                f"{GATE_BASE_URL}{endpoint}",
-                headers=headers,
-                params=params,
-                json=body,
-                timeout=10,
-                verify=verify_option
-            )
+            response = requests.post(full_url, headers=headers, params=params, json=body, timeout=10, verify=verify_option)
         else:
             return jsonify({"error": "Unsupported method"}), 400
 
