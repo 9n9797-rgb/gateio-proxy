@@ -36,14 +36,14 @@ def health():
 @app.route("/proxy", methods=["GET", "POST"])
 def proxy():
     try:
-        # قراءة البيانات سواء كانت من GET أو POST
+        # قراءة البيانات من GET أو POST
         data = request.json if request.is_json else request.args
         method = data.get("method", "GET").upper()
         endpoint = data.get("endpoint")
         params = json.loads(data.get("params", "{}")) if isinstance(data.get("params"), str) else data.get("params", {})
         body = json.loads(data.get("body", "{}")) if isinstance(data.get("body"), str) else data.get("body", {})
 
-        # التحكم في SSL من الباراميتر
+        # التحقق من SSL حسب الباراميتر
         verify_ssl_param = str(data.get("verify_ssl", "true")).lower() == "true"
         verify_option = certifi.where() if verify_ssl_param else False
 
@@ -55,7 +55,7 @@ def proxy():
         body_str = json.dumps(body) if body else ""
         headers = sign_request(method, url_path, query_string, body_str)
 
-        # إرسال الطلب لـ Gate.io
+        # إرسال الطلب
         if method == "GET":
             response = requests.get(
                 f"{GATE_BASE_URL}{endpoint}",
@@ -76,8 +76,14 @@ def proxy():
         else:
             return jsonify({"error": "Unsupported method"}), 400
 
-        # إرجاع الرد
-        return jsonify(response.json()), response.status_code
+        # إعادة الرد كـ JSON أو نص خام
+        try:
+            return jsonify(response.json()), response.status_code
+        except json.JSONDecodeError:
+            return jsonify({
+                "error": "Invalid JSON response from Gate.io",
+                "raw_response": response.text
+            }), 502
 
     except requests.exceptions.SSLError as ssl_err:
         return jsonify({"error": "SSL verification failed", "details": str(ssl_err)}), 502
