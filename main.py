@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 API_KEY = os.getenv("GATE_API_KEY")
 API_SECRET = os.getenv("GATE_API_SECRET")
-GATE_BASE_URL = "https://api.gate.io/api/v4"
+GATE_BASE_URL = "https://api.gate.io/api/v4"  # تأكد أنه مضبوط 100%
 
 def sign_request(method, url_path, query_string="", body=""):
     t = str(int(time.time()))
@@ -36,7 +36,6 @@ def health():
 @app.route("/proxy", methods=["GET", "POST"])
 def proxy():
     try:
-        # قراءة البيانات
         if request.method == "GET":
             method = request.args.get("method", "GET").upper()
             endpoint = request.args.get("endpoint")
@@ -51,20 +50,24 @@ def proxy():
             body = json.loads(data.get("body", "{}")) if isinstance(data.get("body"), str) else data.get("body", {})
             verify_ssl_param = str(data.get("verify_ssl", "false")).lower() == "true"
 
-        if not endpoint:
-            return jsonify({"error": "Missing endpoint"}), 400
+        # طباعة القيم للتشخيص
+        print("DEBUG - Raw endpoint:", endpoint)
+        print("DEBUG - GATE_BASE_URL:", GATE_BASE_URL)
 
-        # تنظيف endpoint وضبطه
+        if not endpoint or endpoint.strip() == "":
+            return jsonify({"error": "Missing or empty endpoint"}), 400
+
+        # تنظيف وضبط الـ endpoint
         endpoint = endpoint.strip()
         if not endpoint.startswith("/"):
             endpoint = "/" + endpoint
 
-        # تحديد خيار SSL
-        verify_option = certifi.where() if verify_ssl_param else False
-
         # بناء الرابط النهائي
         full_url = f"{GATE_BASE_URL}{endpoint}"
-        print(f"DEBUG - Requesting URL: {full_url}")
+        print("DEBUG - Final full_url:", full_url)
+
+        # اختيار التحقق من SSL
+        verify_option = certifi.where() if verify_ssl_param else False
 
         # توقيع الطلب
         url_path = endpoint
@@ -80,6 +83,7 @@ def proxy():
         else:
             return jsonify({"error": "Unsupported method"}), 400
 
+        # إعادة النتيجة
         try:
             return jsonify(response.json()), response.status_code
         except json.JSONDecodeError:
