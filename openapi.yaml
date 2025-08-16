@@ -8,7 +8,7 @@ servers:
 paths:
   /proxy/balances:
     get:
-      summary: الحصول على أرصدة المحفظة
+      summary: عرض الأرصدة
       operationId: getBalances
       responses:
         '200':
@@ -26,9 +26,10 @@ paths:
                       type: string
                     locked:
                       type: string
+
   /proxy/orders:
     post:
-      summary: إنشاء أمر شراء/بيع
+      summary: إنشاء أمر جديد (شراء/بيع)
       operationId: createOrder
       requestBody:
         required: true
@@ -49,6 +50,9 @@ paths:
                 amount:
                   type: string
                   example: "0.001"
+                price:
+                  type: string
+                  example: "30000"
       responses:
         '200':
           description: تفاصيل الأمر
@@ -56,3 +60,17 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /proxy/orders/history:
+    get:
+      summary: عرض سجل الأوامر
+      operationId: getOrdersHistory
+      responses:
+        '200':
+          description: أوامر سابقة
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
