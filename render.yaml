@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: gateio-proxy
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node server.js"
+    envVars:
+      - key: GATEIO_API_KEY
+        sync: false
+      - key: GATEIO_API_SECRET
+        sync: false
