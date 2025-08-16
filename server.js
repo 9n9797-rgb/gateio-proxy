@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import GateApi from "gate-api";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 
@@ -42,11 +44,11 @@ app.get("/proxy/orders/open", async (req, res) => {
 app.post("/proxy/orders", async (req, res) => {
   try {
     const order = {
-      currency_pair: req.body.currency_pair, // مثل BTC_USDT
-      type: req.body.type || "limit",        // market أو limit
-      side: req.body.side,                   // buy أو sell
-      amount: req.body.amount,               // الكمية
-      price: req.body.price                  // مطلوب لو type = limit
+      currency_pair: req.body.currency_pair,
+      type: req.body.type || "limit",
+      side: req.body.side,
+      amount: req.body.amount,
+      price: req.body.price
     };
 
     const result = await spotApi.createOrder(order);
@@ -74,6 +76,13 @@ app.get("/proxy/orders/history", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ✅ توزيع ملف openapi.yaml
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+app.get("/openapi.yaml", (req, res) => {
+  res.sendFile(path.join(__dirname, "openapi.yaml"));
 });
 
 // 🚀 تشغيل السيرفر
