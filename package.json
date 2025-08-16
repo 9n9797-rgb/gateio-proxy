@@ -4,6 +4,10 @@
   "description": "Proxy API for Gate.io to use with GPT Actions",
   "main": "server.js",
   "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js"
   },
