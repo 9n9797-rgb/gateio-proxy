@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: gateio-proxy
+    name: gateio-proxy-v2
     env: node
     region: oregon
     plan: free
