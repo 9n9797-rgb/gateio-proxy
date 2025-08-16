@@ -29,29 +29,50 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
   return { signature, timestamp: ts };
 }
 
-// ✅ Helper: يرجع الرد الخام للعميل مباشرة
+// ✅ Helper: preview raw response
 async function parseGateResponse(r, res) {
   const text = await r.text();
   const headers = Object.fromEntries(r.headers.entries());
 
-  res.status(r.status).json({
-    status: r.status,
-    headers: headers,
-    body: text
-  });
+  try {
+    const data = JSON.parse(text);
+    res.json(data);
+  } catch {
+    console.error("❌ ERROR in parseGateResponse, Gate.io raw reply:");
+    console.error(text.slice(0, 300)); // اطبع أول 300 حرف باللوق
+
+    res.status(r.status).json({
+      status: r.status,
+      headers,
+      preview: text.slice(0, 500) // أول 500 حرف بس
+    });
+  }
 }
 
-// 🆕 نسخة تحقق
-app.get("/version-check", (req, res) => {
-  res.json({
-    version: "v3.0",
-    parsePreview: parseGateResponse.toString().slice(0, 200)
-  });
+app.get("/proxy/balances", async (req, res) => {
+  try {
+    const endpoint = "/api/v4/spot/accounts";
+    const url = `https://api.gateio.ws${endpoint}`;
+    const { signature, timestamp } = await signRequest("GET", endpoint);
+
+    const r = await fetch(url, {
+      method: "GET",
+      headers: {
+        "KEY": API_KEY,
+        "SIGN": signature,
+        "Timestamp": timestamp,
+        "Content-Type": "application/json",
+      },
+    });
+
+    await parseGateResponse(r, res);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-// 🆕 Debug مطلق لمسار balances
-app.get("/proxy/balances", async (req, res) => {
-  console.log("🚀 دخل فعلياً على /proxy/balances v3.0");
+// 🆕 Debug endpoint: يرجع الرد الخام
+app.get("/proxy/debug-balances", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/accounts";
     const url = `https://api.gateio.ws${endpoint}`;
@@ -68,54 +89,11 @@ app.get("/proxy/balances", async (req, res) => {
     });
 
     const text = await r.text();
-    console.log("=== RAW RESPONSE FROM GATE.IO ===");
-    console.log(text);
-    console.log("================================");
-
-    res.status(200).json({
-      debug: true,
+    res.status(r.status).json({
       status: r.status,
-      headers: Object.fromEntries(r.headers.entries()),
-      raw: text
+      preview: text.slice(0, 500) // أول 500 حرف
     });
   } catch (e) {
-    console.error("❌ ERROR in /proxy/balances:", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post("/proxy/orders", async (req, res) => {
-  console.log("🚀 دخل فعلياً على /proxy/orders v3.0");
-  try {
-    const endpoint = "/api/v4/spot/orders";
-    const url = `https://api.gateio.ws${endpoint}`;
-    const body = req.body;
-    const { signature, timestamp } = await signRequest("POST", endpoint, "", body);
-
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "KEY": API_KEY,
-        "SIGN": signature,
-        "Timestamp": timestamp,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    const text = await r.text();
-    console.log("=== RAW ORDER RESPONSE ===");
-    console.log(text);
-    console.log("==========================");
-
-    res.status(200).json({
-      debug: true,
-      status: r.status,
-      headers: Object.fromEntries(r.headers.entries()),
-      raw: text
-    });
-  } catch (e) {
-    console.error("❌ ERROR in /proxy/orders:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -123,4 +101,4 @@ app.post("/proxy/orders", async (req, res) => {
 app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Proxy v3.0 يعمل على المنفذ ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Debug Proxy يعمل على المنفذ ${PORT}`));
