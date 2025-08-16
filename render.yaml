@@ -3,11 +3,32 @@ services:
     name: gateio-proxy-v2
     env: node
     region: oregon
-    plan: free
+    plan: starter
+
     buildCommand: "npm install"
     startCommand: "node server.js"
+    autoDeploy: true
+
+    # يستخدم Render متغير PORT تلقائياً — تأكد أن server.js يقرأ process.env.PORT
+    healthCheckPath: "/healthz"
+    healthCheckIntervalSeconds: 10
+    healthCheckTimeoutSeconds: 5
+
     envVars:
+      - key: NODE_ENV
+        value: "production"
       - key: GATEIO_API_KEY
-        sync: false
+        sync: false   # أضفه من لوحة Render → Environment
       - key: GATEIO_API_SECRET
-        sync: false
+        sync: false   # أضفه من لوحة Render → Environment
+
+    # (اختياري) تحويلات/روابط مختصرة
+    routes:
+      - type: rewrite
+        source: "/openapi"
+        destination: "/openapi.yaml"
+      # مثال إعادة توجيه اختياري:
+      # - type: redirect
+      #   source: "/docs"
+      #   destination: "/openapi.yaml"
+      #   status: 302
