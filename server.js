@@ -10,18 +10,18 @@ app.use(cors());
 const API_KEY = process.env.GATEIO_API_KEY;
 const API_SECRET = process.env.GATEIO_API_SECRET;
 
-// ✅ دالة التوقيع (مصدرها من مستندات Gate.io الرسمية)
-function signRequest(method, endpoint, query_string, body) {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const body_str = body ? JSON.stringify(body) : "";
-  const payload = [method, endpoint, query_string, body_str, timestamp].join("\n");
+// ✅ دالة التوقيع (مطابقة لمستندات Gate.io)
+function signRequest(method, endpoint, query_string = "", body = "") {
+  const ts = Math.floor(Date.now() / 1000).toString();
+  const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
+  const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
   const signature = crypto
     .createHmac("sha512", API_SECRET)
     .update(payload)
     .digest("hex");
 
-  return { signature, timestamp };
+  return { signature, timestamp: ts };
 }
 
 // ✅ Endpoint لعرض الرصيد
@@ -29,7 +29,7 @@ app.get("/proxy/balances", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/accounts";
     const url = `https://api.gateio.ws${endpoint}`;
-    const { signature, timestamp } = signRequest("GET", endpoint, "", null);
+    const { signature, timestamp } = signRequest("GET", endpoint);
 
     const r = await fetch(url, {
       method: "GET",
@@ -74,11 +74,7 @@ app.post("/proxy/orders", async (req, res) => {
   }
 });
 
-// ✅ Endpoint صحي لفحص الخدمة
-app.get("/healthz", (req, res) => {
-  res.status(200).send("OK");
-});
+app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
-// 🚀 تشغيل السيرفر
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Proxy يعمل على المنفذ ${PORT}`));
