@@ -42,14 +42,14 @@ app.get("/proxy/orders/open", async (req, res) => {
 app.post("/proxy/orders", async (req, res) => {
   try {
     const order = {
-      currency_pair: req.body.currency_pair, // "BTC_USDT"
-      type: req.body.type || "limit",       // "limit" or "market"
-      side: req.body.side,                  // "buy" or "sell"
-      amount: req.body.amount,              // "0.001"
-      price: req.body.price                 // مطلوب فقط للـ LIMIT
+      currency_pair: req.body.currency_pair, // مثل BTC_USDT
+      type: req.body.type || "limit",        // market أو limit
+      side: req.body.side,                   // buy أو sell
+      amount: req.body.amount,               // الكمية
+      price: req.body.price                  // مطلوب لو type = limit
     };
 
-    const result = await spotApi.createSpotOrder(order);
+    const result = await spotApi.createOrder(order);
     res.json(result.body);
   } catch (e) {
     res.status(500).json({ error: e.message });
