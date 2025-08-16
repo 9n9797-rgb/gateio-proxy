@@ -1,5 +1,5 @@
 {
-  "name": "gateio-proxy",
+  "name": "gateio-proxy-v2",
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
