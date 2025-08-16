@@ -38,11 +38,13 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
 
 // ✅ Helper
 async function parseGateResponse(r, res) {
-  const text = await r.text();
+  console.error("=== Gate.io RESPONSE INFO ===");
+  console.error("Status:", r.status);
+  console.error("Headers:", Object.fromEntries(r.headers.entries()));
 
-  console.error("=== Gate.io RAW RESPONSE START ===");
-  console.error(text);
-  console.error("=== Gate.io RAW RESPONSE END ===");
+  const text = await r.text();
+  console.error("Body:\n", text);
+  console.error("=== END RESPONSE INFO ===");
 
   try {
     const data = JSON.parse(text);
