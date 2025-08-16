@@ -10,16 +10,23 @@ app.use(cors());
 const API_KEY = process.env.GATEIO_API_KEY;
 const API_SECRET = process.env.GATEIO_API_SECRET;
 
-// ✅ دالة التوقيع (مطابقة لمستندات Gate.io)
+// ✅ دالة التوقيع مع Debug Logs
 function signRequest(method, endpoint, query_string = "", body = "") {
   const ts = Math.floor(Date.now() / 1000).toString();
   const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
   const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
+  // 📝 Debug logs
+  console.log("🔑 Signing payload:");
+  console.log(payload);
+  console.log("⏱ Timestamp:", ts);
+
   const signature = crypto
     .createHmac("sha512", API_SECRET)
     .update(payload)
     .digest("hex");
+
+  console.log("✅ Signature:", signature);
 
   return { signature, timestamp: ts };
 }
@@ -74,7 +81,9 @@ app.post("/proxy/orders", async (req, res) => {
   }
 });
 
+// ✅ Health check
 app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
+// 🚀 تشغيل السيرفر
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Proxy يعمل على المنفذ ${PORT}`));
