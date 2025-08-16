@@ -21,37 +21,24 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
   const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
   const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
-  console.error("=== SIGN DEBUG START ===");
-  console.error("Payload:\n", payload);
-  console.error("Timestamp (Gate.io):", ts);
-
   const signature = crypto
     .createHmac("sha512", API_SECRET)
     .update(payload)
     .digest("hex");
 
-  console.error("Signature:", signature);
-  console.error("=== SIGN DEBUG END ===");
-
   return { signature, timestamp: ts };
 }
 
-// ✅ Helper
+// ✅ Helper: يرجع الرد الخام للعميل مباشرة
 async function parseGateResponse(r, res) {
-  console.error("=== Gate.io RESPONSE INFO ===");
-  console.error("Status:", r.status);
-  console.error("Headers:", Object.fromEntries(r.headers.entries()));
-
   const text = await r.text();
-  console.error("Body:\n", text);
-  console.error("=== END RESPONSE INFO ===");
+  const headers = Object.fromEntries(r.headers.entries());
 
-  try {
-    const data = JSON.parse(text);
-    res.json(data);
-  } catch {
-    res.status(r.status).send(text);
-  }
+  res.status(r.status).json({
+    status: r.status,
+    headers: headers,
+    body: text
+  });
 }
 
 app.get("/proxy/balances", async (req, res) => {
@@ -103,4 +90,4 @@ app.post("/proxy/orders", async (req, res) => {
 app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.error(`✅ Proxy يعمل على المنفذ ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Proxy يعمل على المنفذ ${PORT}`));
