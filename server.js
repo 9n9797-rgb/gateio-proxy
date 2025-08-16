@@ -39,12 +39,16 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
 // ✅ Helper
 async function parseGateResponse(r, res) {
   const text = await r.text();
+
+  console.log("=== Gate.io RAW RESPONSE ===");
+  console.log(text);
+  console.log("============================");
+
   try {
     const data = JSON.parse(text);
     res.json(data);
   } catch {
-    console.error("Gate.io raw response:", text);
-    res.status(r.status).send(text); // 👈 يرسل النص الخام بدل JSON مكسر
+    res.status(r.status).send(text);
   }
 }
 
