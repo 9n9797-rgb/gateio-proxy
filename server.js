@@ -10,13 +10,15 @@ app.use(cors());
 const API_KEY = process.env.GATEIO_API_KEY;
 const API_SECRET = process.env.GATEIO_API_SECRET;
 
-// ✅ دالة التوقيع مع Debug Logs
+// ✅ دالة التوقيع مع إصلاح الـ Timestamp + Debug Logs
 function signRequest(method, endpoint, query_string = "", body = "") {
+  // التوقيت الصحيح (بالثواني)
   const ts = Math.floor(Date.now() / 1000).toString();
+
   const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
   const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
-  // 📝 Debug logs (هتظهر في Render Live Tail)
+  // 📝 Debug logs (تظهر في Render Live Tail)
   console.log("=== SIGN DEBUG ===");
   console.log("Payload:\n", payload);
   console.log("Timestamp:", ts);
