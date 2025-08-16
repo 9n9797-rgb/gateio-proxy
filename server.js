@@ -41,15 +41,17 @@ async function parseGateResponse(r, res) {
   });
 }
 
-// 🆕 مسار لفحص النسخة الحالية
+// 🆕 نسخة تحقق
 app.get("/version-check", (req, res) => {
   res.json({
-    version: "v2.1",
-    parsePreview: parseGateResponse.toString().slice(0, 200) // أول 200 حرف
+    version: "v3.0",
+    parsePreview: parseGateResponse.toString().slice(0, 200)
   });
 });
 
+// 🆕 Debug مطلق لمسار balances
 app.get("/proxy/balances", async (req, res) => {
+  console.log("🚀 دخل فعلياً على /proxy/balances v3.0");
   try {
     const endpoint = "/api/v4/spot/accounts";
     const url = `https://api.gateio.ws${endpoint}`;
@@ -65,13 +67,25 @@ app.get("/proxy/balances", async (req, res) => {
       },
     });
 
-    await parseGateResponse(r, res);
+    const text = await r.text();
+    console.log("=== RAW RESPONSE FROM GATE.IO ===");
+    console.log(text);
+    console.log("================================");
+
+    res.status(200).json({
+      debug: true,
+      status: r.status,
+      headers: Object.fromEntries(r.headers.entries()),
+      raw: text
+    });
   } catch (e) {
+    console.error("❌ ERROR in /proxy/balances:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
 app.post("/proxy/orders", async (req, res) => {
+  console.log("🚀 دخل فعلياً على /proxy/orders v3.0");
   try {
     const endpoint = "/api/v4/spot/orders";
     const url = `https://api.gateio.ws${endpoint}`;
@@ -89,8 +103,19 @@ app.post("/proxy/orders", async (req, res) => {
       body: JSON.stringify(body),
     });
 
-    await parseGateResponse(r, res);
+    const text = await r.text();
+    console.log("=== RAW ORDER RESPONSE ===");
+    console.log(text);
+    console.log("==========================");
+
+    res.status(200).json({
+      debug: true,
+      status: r.status,
+      headers: Object.fromEntries(r.headers.entries()),
+      raw: text
+    });
   } catch (e) {
+    console.error("❌ ERROR in /proxy/orders:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -98,4 +123,4 @@ app.post("/proxy/orders", async (req, res) => {
 app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Proxy DEBUG يعمل على المنفذ ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Proxy v3.0 يعمل على المنفذ ${PORT}`));
