@@ -62,3 +62,94 @@ paths:
                       total: "0.015"
         "502":
           $ref: "#/components/responses/UpstreamError"
+
+  # (اختياري) فحص صحة السيرفر بدون بروكسي
+  /healthz:
+    get:
+      summary: فحص صحة السيرفر (محلي)
+      operationId: getHealthz
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+                  ts: { type: number }
+                required: [ok, service]
+
+  # (اختياري) فحص اتصال Gate.io عبر الوكيل بدون مفاتيح
+  /proxy/healthz:
+    get:
+      summary: فحص الاتصال بـ Gate.io عبر الوكيل (بدون مفاتيح)
+      operationId: getProxyHealthz
+      responses:
+        "200":
+          description: Upstream status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upstream: { type: boolean }
+                  status: { type: integer, nullable: true }
+                  error: { type: string, nullable: true }
+                  checked_endpoint: { type: string }
+                required: [upstream, checked_endpoint]
+          # في حال أردت تعريف خطأ موحد أيضًا:
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+
+components:
+  schemas:
+    Balance:
+      type: object
+      description: رصيد عملة واحدة
+      properties:
+        currency:
+          type: string
+          description: رمز العملة (USDT, BTC, ...)
+        available:
+          type: string
+          description: الرصيد المتاح
+        frozen:
+          type: string
+          description: الرصيد المجمد/المحجوز
+        total:
+          type: string
+          description: إجمالي الرصيد (available + frozen)
+      required: [currency, available, frozen, total]
+
+  responses:
+    UpstreamError:
+      description: فشل استدعاء الخدمة الخارجية (Gate.io)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              upstream:
+                type: boolean
+                description: هل الاتصال بالمصدر الخارجي متاح
+              status:
+                type: integer
+                nullable: true
+                description: كود HTTP من المصدر الخارجي إن توفّر
+              error:
+                type: string
+                nullable: true
+                description: رسالة خطأ مختصرة
+              checked_endpoint:
+                type: string
+                description: المسار الذي تم فحصه في المصدر الخارجي
+            required: [upstream, checked_endpoint]
+          examples:
+            example502:
+              value:
+                upstream: false
+                status: 502
+                error: "Bad Gateway or timeout"
+                checked_endpoint: "/api/v4/spot/currency_pairs"
