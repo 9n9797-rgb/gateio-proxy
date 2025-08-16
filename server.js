@@ -16,22 +16,23 @@ function signRequest(method, endpoint, query_string = "", body = "") {
   const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
   const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
-  // 📝 Debug logs
-  console.log("🔑 Signing payload:");
-  console.log(payload);
-  console.log("⏱ Timestamp:", ts);
+  // 📝 Debug logs (هتظهر في Render Live Tail)
+  console.log("=== SIGN DEBUG ===");
+  console.log("Payload:\n", payload);
+  console.log("Timestamp:", ts);
 
   const signature = crypto
     .createHmac("sha512", API_SECRET)
     .update(payload)
     .digest("hex");
 
-  console.log("✅ Signature:", signature);
+  console.log("Signature:", signature);
+  console.log("=================");
 
   return { signature, timestamp: ts };
 }
 
-// ✅ Endpoint لعرض الرصيد
+// ✅ Endpoint: رصيد الحساب
 app.get("/proxy/balances", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/accounts";
@@ -55,7 +56,7 @@ app.get("/proxy/balances", async (req, res) => {
   }
 });
 
-// ✅ Endpoint لإنشاء أمر (شراء/بيع)
+// ✅ Endpoint: إنشاء أمر (شراء/بيع)
 app.post("/proxy/orders", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/orders";
