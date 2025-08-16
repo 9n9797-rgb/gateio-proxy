@@ -10,21 +10,17 @@ app.use(cors());
 const API_KEY = process.env.GATEIO_API_KEY;
 const API_SECRET = process.env.GATEIO_API_SECRET;
 
-// ✅ دالة تجيب توقيت Gate.io (ثواني Unix)
 async function getServerTime() {
   const r = await fetch("https://api.gateio.ws/api/v4/time");
   const data = await r.json();
   return data.server_time.toString();
 }
 
-// ✅ دالة التوقيع (مع Debug Logs)
 async function signRequest(method, endpoint, query_string = "", body = "") {
-  const ts = await getServerTime(); // 🕒 التوقيت من Gate.io نفسه
-
+  const ts = await getServerTime();
   const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
   const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
-  // 📝 Debug logs
   console.log("=== SIGN DEBUG ===");
   console.log("Payload:\n", payload);
   console.log("Timestamp (Gate.io):", ts);
@@ -40,7 +36,7 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
   return { signature, timestamp: ts };
 }
 
-// ✅ Helper: قراءة الرد (JSON أو نص خام)
+// ✅ Helper
 async function parseGateResponse(r, res) {
   const text = await r.text();
   try {
@@ -48,11 +44,10 @@ async function parseGateResponse(r, res) {
     res.json(data);
   } catch {
     console.error("Gate.io raw response:", text);
-    res.status(r.status).send(text);
+    res.status(r.status).send(text); // 👈 يرسل النص الخام بدل JSON مكسر
   }
 }
 
-// ✅ Endpoint: رصيد الحساب
 app.get("/proxy/balances", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/accounts";
@@ -75,7 +70,6 @@ app.get("/proxy/balances", async (req, res) => {
   }
 });
 
-// ✅ Endpoint: إنشاء أمر (شراء/بيع)
 app.post("/proxy/orders", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/orders";
@@ -100,9 +94,7 @@ app.post("/proxy/orders", async (req, res) => {
   }
 });
 
-// ✅ Health check
 app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
-// 🚀 تشغيل السيرفر
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Proxy يعمل على المنفذ ${PORT}`));
