@@ -3,8 +3,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import GateApi from "gate-api";
-import path from "path";
-import { fileURLToPath } from "url";
 
 dotenv.config();
 
@@ -12,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// إعداد Gate API
+// إعداد Gate API Client
 const client = new GateApi.ApiClient();
 client.setApiKeySecret(process.env.GATEIO_API_KEY, process.env.GATEIO_API_SECRET);
 const spotApi = new GateApi.SpotApi(client);
@@ -40,15 +38,15 @@ app.get("/proxy/orders/open", async (req, res) => {
   }
 });
 
-// ✅ إنشاء أمر (شراء / بيع)
+// ✅ إنشاء أمر شراء/بيع
 app.post("/proxy/orders", async (req, res) => {
   try {
     const order = {
-      currency_pair: req.body.currency_pair,
-      type: req.body.type || "limit",
-      side: req.body.side,
-      amount: req.body.amount,
-      price: req.body.price
+      currency_pair: req.body.currency_pair, // مثل: BTC_USDT
+      type: req.body.type || "market",       // market أو limit
+      side: req.body.side,                   // buy أو sell
+      amount: req.body.amount,               // مثل: 0.001
+      price: req.body.price                  // مطلوب فقط للـ limit
     };
 
     const result = await spotApi.createOrder(order);
@@ -61,14 +59,14 @@ app.post("/proxy/orders", async (req, res) => {
 // ✅ إلغاء أمر
 app.delete("/proxy/orders/:id", async (req, res) => {
   try {
-    const result = await spotApi.cancelSpotOrder(req.params.id, { currency_pair: req.query.currency_pair });
+    const result = await spotApi.cancelOrder(req.params.id, req.query.currency_pair);
     res.json(result.body);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// ✅ سجل الأوامر
+// ✅ سجل الأوامر المنفذة
 app.get("/proxy/orders/history", async (req, res) => {
   try {
     const result = await spotApi.listSpotOrders({ status: "finished" });
@@ -76,13 +74,6 @@ app.get("/proxy/orders/history", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-// ✅ توزيع ملف openapi.yaml
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-app.get("/openapi.yaml", (req, res) => {
-  res.sendFile(path.join(__dirname, "openapi.yaml"));
 });
 
 // 🚀 تشغيل السيرفر
