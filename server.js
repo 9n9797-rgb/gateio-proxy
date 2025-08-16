@@ -41,6 +41,14 @@ async function parseGateResponse(r, res) {
   });
 }
 
+// 🆕 مسار لفحص النسخة الحالية
+app.get("/version-check", (req, res) => {
+  res.json({
+    version: "v2.1",
+    parsePreview: parseGateResponse.toString().slice(0, 200) // أول 200 حرف
+  });
+});
+
 app.get("/proxy/balances", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/accounts";
@@ -90,4 +98,4 @@ app.post("/proxy/orders", async (req, res) => {
 app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Proxy v2 يعمل على المنفذ ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Proxy DEBUG يعمل على المنفذ ${PORT}`));
