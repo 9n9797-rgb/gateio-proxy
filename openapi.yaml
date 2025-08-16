@@ -3,10 +3,8 @@ info:
   title: Gate.io Proxy API
   description: واجهة بروكسي للاتصال بـ Gate.io عبر OpenAI GPT Actions
   version: 1.0.0
-
 servers:
   - url: https://gateio-proxy-v2.onrender.com
-
 paths:
   /proxy/balances:
     get:
@@ -28,7 +26,6 @@ paths:
                       type: string
                     locked:
                       type: string
-
   /proxy/orders:
     post:
       summary: إنشاء أمر شراء/بيع
@@ -52,9 +49,6 @@ paths:
                 amount:
                   type: string
                   example: "0.001"
-                price:
-                  type: string
-                  example: "30000"
       responses:
         '200':
           description: تفاصيل الأمر
@@ -62,45 +56,3 @@ paths:
             application/json:
               schema:
                 type: object
-
-  /proxy/orders/open:
-    get:
-      summary: الأوامر المفتوحة
-      operationId: listOpenOrders
-      responses:
-        '200':
-          description: قائمة الأوامر المفتوحة
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-
-  /proxy/orders/history:
-    get:
-      summary: سجل الأوامر
-      operationId: listOrderHistory
-      responses:
-        '200':
-          description: قائمة الأوامر المنفذة
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-
-  /proxy/orders/{id}:
-    delete:
-      summary: إلغاء أمر
-      operationId: cancelOrder
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: نتيجة الإلغاء
