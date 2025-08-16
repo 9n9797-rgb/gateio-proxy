@@ -21,17 +21,17 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
   const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
   const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
-  console.log("=== SIGN DEBUG ===");
-  console.log("Payload:\n", payload);
-  console.log("Timestamp (Gate.io):", ts);
+  console.error("=== SIGN DEBUG START ===");
+  console.error("Payload:\n", payload);
+  console.error("Timestamp (Gate.io):", ts);
 
   const signature = crypto
     .createHmac("sha512", API_SECRET)
     .update(payload)
     .digest("hex");
 
-  console.log("Signature:", signature);
-  console.log("=================");
+  console.error("Signature:", signature);
+  console.error("=== SIGN DEBUG END ===");
 
   return { signature, timestamp: ts };
 }
@@ -40,9 +40,9 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
 async function parseGateResponse(r, res) {
   const text = await r.text();
 
-  console.log("=== Gate.io RAW RESPONSE ===");
-  console.log(text);
-  console.log("============================");
+  console.error("=== Gate.io RAW RESPONSE START ===");
+  console.error(text);
+  console.error("=== Gate.io RAW RESPONSE END ===");
 
   try {
     const data = JSON.parse(text);
@@ -101,4 +101,4 @@ app.post("/proxy/orders", async (req, res) => {
 app.get("/healthz", (req, res) => res.status(200).send("OK"));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Proxy يعمل على المنفذ ${PORT}`));
+app.listen(PORT, () => console.error(`✅ Proxy يعمل على المنفذ ${PORT}`));
