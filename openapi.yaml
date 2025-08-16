@@ -1,50 +1,64 @@
-  /proxy/orders:
-    post:
-      summary: إنشاء أمر جديد (شراء/بيع)
-      operationId: createOrder
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                currency_pair:
-                  type: string
-                  example: BTC_USDT
-                type:
-                  type: string
-                  example: market
-                side:
-                  type: string
-                  example: buy
-                amount:
-                  type: string
-                  example: "0.001"
-                price:
-                  type: string
-                  example: "30000"
+openapi: 3.1.0
+info:
+  title: Gate.io Proxy API (Render)
+  version: "1.0.0"
+  description: |
+    واجهة بروكسي للقراءة من Gate.io عبر خادم Render.
+    جميع المسارات هنا **قراءة فقط** ولا تُحدث حساب المستخدم.
+servers:
+  - url: https://gateio-proxy-v2.onrender.com
+    description: Render Production
+
+paths:
+  /proxy/health:
+    get:
+      summary: فحص صحة الخدمة
+      operationId: getHealth
       responses:
-        '200':
-          description: تفاصيل الأمر
+        "200":
+          description: معلومات بسيطة عن صحة الخدمة
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
+                  ok:
+                    type: boolean
+                    description: هل الخدمة تعمل
+                  service:
                     type: string
-                    description: معرف الأمر
-                  status:
+                    description: اسم الخدمة
+                  time:
                     type: string
-                    description: حالة الأمر (مثال: open, closed, finished)
-                  currency_pair:
-                    type: string
-                  type:
-                    type: string
-                  side:
-                    type: string
-                  amount:
-                    type: string
-                  price:
-                    type: string
+                    description: التوقيت الحالي على الخادم (ISO-8601)
+                required: [ok, service, time]
+              examples:
+                default:
+                  value: { ok: true, service: "gateio-proxy", time: "2025-08-16T12:34:56Z" }
+
+  /proxy/balances:
+    get:
+      summary: الحصول على أرصدة المحفظة
+      operationId: getBalances
+      responses:
+        "200":
+          description: قائمة الأرصدة المتاحة
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Balance"
+              examples:
+                sample:
+                  value:
+                    - currency: "USDT"
+                      available: "1234.56"
+                      frozen: "0.00"
+                      total: "1234.56"
+                    - currency: "BTC"
+                      available: "0.015"
+                      frozen: "0.000"
+                      total: "0.015"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
