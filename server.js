@@ -1,31 +1,24 @@
+// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import GateApi from "gate-api";
 
 dotenv.config();
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-const config = new GateApi.Configuration({
-  key: process.env.GATEIO_API_KEY,
-  secret: process.env.GATEIO_API_SECRET,
-});
-const spotApi = new GateApi.SpotApi(config);
+// إعداد Gate API
+const client = new GateApi.ApiClient();
+client.setApiKeySecret(process.env.GATEIO_API_KEY, process.env.GATEIO_API_SECRET);
+const spotApi = new GateApi.SpotApi(client);
 
-// ==================== API ====================
+// ✅ Health Check
+app.get("/healthz", (req, res) => res.json({ status: "ok" }));
 
-// Health check
-app.get("/healthz", (req, res) => {
-  res.status(200).send("OK");
-});
-
-// 🔹 عرض الرصيد
+// ✅ رصيد المحفظة
 app.get("/proxy/balances", async (req, res) => {
   try {
     const result = await spotApi.listSpotAccounts();
@@ -35,31 +28,54 @@ app.get("/proxy/balances", async (req, res) => {
   }
 });
 
-// 🔹 إنشاء طلب (شراء/بيع)
-app.post("/proxy/orders", async (req, res) => {
+// ✅ الأوامر المفتوحة
+app.get("/proxy/orders/open", async (req, res) => {
   try {
-    const order = new GateApi.Order(req.body);
-    const result = await spotApi.createOrder(order);
+    const result = await spotApi.listSpotOrders({ status: "open" });
     res.json(result.body);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// ==================== OpenAPI ====================
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// ✅ إنشاء أمر (شراء / بيع)
+app.post("/proxy/orders", async (req, res) => {
+  try {
+    const order = {
+      currency_pair: req.body.currency_pair, // "BTC_USDT"
+      type: req.body.type || "limit",       // "limit" or "market"
+      side: req.body.side,                  // "buy" or "sell"
+      amount: req.body.amount,              // "0.001"
+      price: req.body.price                 // مطلوب فقط للـ LIMIT
+    };
 
-app.get("/openapi.yaml", (req, res) => {
-  const yamlPath = path.join(__dirname, "openapi.yaml");
-  if (fs.existsSync(yamlPath)) {
-    res.setHeader("Content-Type", "application/yaml");
-    res.sendFile(yamlPath);
-  } else {
-    res.status(404).send("openapi.yaml not found");
+    const result = await spotApi.createSpotOrder(order);
+    res.json(result.body);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-// ==================== Run Server ====================
+// ✅ إلغاء أمر
+app.delete("/proxy/orders/:id", async (req, res) => {
+  try {
+    const result = await spotApi.cancelSpotOrder(req.params.id, { currency_pair: req.query.currency_pair });
+    res.json(result.body);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ✅ سجل الأوامر
+app.get("/proxy/orders/history", async (req, res) => {
+  try {
+    const result = await spotApi.listSpotOrders({ status: "finished" });
+    res.json(result.body);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 🚀 تشغيل السيرفر
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));
