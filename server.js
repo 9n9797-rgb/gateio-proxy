@@ -40,6 +40,18 @@ async function signRequest(method, endpoint, query_string = "", body = "") {
   return { signature, timestamp: ts };
 }
 
+// ✅ Helper: قراءة الرد (JSON أو نص خام)
+async function parseGateResponse(r, res) {
+  const text = await r.text();
+  try {
+    const data = JSON.parse(text);
+    res.json(data);
+  } catch {
+    console.error("Gate.io raw response:", text);
+    res.status(r.status).send(text);
+  }
+}
+
 // ✅ Endpoint: رصيد الحساب
 app.get("/proxy/balances", async (req, res) => {
   try {
@@ -57,8 +69,7 @@ app.get("/proxy/balances", async (req, res) => {
       },
     });
 
-    const data = await r.json();
-    res.json(data);
+    await parseGateResponse(r, res);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -83,8 +94,7 @@ app.post("/proxy/orders", async (req, res) => {
       body: JSON.stringify(body),
     });
 
-    const data = await r.json();
-    res.json(data);
+    await parseGateResponse(r, res);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
