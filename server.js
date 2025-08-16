@@ -1,104 +1,81 @@
+// server.js
 import express from "express";
-import fetch from "node-fetch";
-import crypto from "crypto";
 import cors from "cors";
+import dotenv from "dotenv";
+import GateApi from "gate-api";
+
+dotenv.config();
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-const API_KEY = process.env.GATEIO_API_KEY;
-const API_SECRET = process.env.GATEIO_API_SECRET;
+// إعداد Gate API
+const client = new GateApi.ApiClient();
+client.setApiKeySecret(process.env.GATEIO_API_KEY, process.env.GATEIO_API_SECRET);
+const spotApi = new GateApi.SpotApi(client);
 
-async function getServerTime() {
-  const r = await fetch("https://api.gateio.ws/api/v4/time");
-  const data = await r.json();
-  return data.server_time.toString();
-}
+// ✅ Health Check
+app.get("/healthz", (req, res) => res.json({ status: "ok" }));
 
-async function signRequest(method, endpoint, query_string = "", body = "") {
-  const ts = await getServerTime();
-  const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
-  const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
-
-  const signature = crypto
-    .createHmac("sha512", API_SECRET)
-    .update(payload)
-    .digest("hex");
-
-  return { signature, timestamp: ts };
-}
-
-// ✅ Helper: preview raw response
-async function parseGateResponse(r, res) {
-  const text = await r.text();
-  const headers = Object.fromEntries(r.headers.entries());
-
-  try {
-    const data = JSON.parse(text);
-    res.json(data);
-  } catch {
-    console.error("❌ ERROR in parseGateResponse, Gate.io raw reply:");
-    console.error(text.slice(0, 300)); // اطبع أول 300 حرف باللوق
-
-    res.status(r.status).json({
-      status: r.status,
-      headers,
-      preview: text.slice(0, 500) // أول 500 حرف بس
-    });
-  }
-}
-
+// ✅ رصيد المحفظة
 app.get("/proxy/balances", async (req, res) => {
   try {
-    const endpoint = "/api/v4/spot/accounts";
-    const url = `https://api.gateio.ws${endpoint}`;
-    const { signature, timestamp } = await signRequest("GET", endpoint);
-
-    const r = await fetch(url, {
-      method: "GET",
-      headers: {
-        "KEY": API_KEY,
-        "SIGN": signature,
-        "Timestamp": timestamp,
-        "Content-Type": "application/json",
-      },
-    });
-
-    await parseGateResponse(r, res);
+    const result = await spotApi.listSpotAccounts();
+    res.json(result.body);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// 🆕 Debug endpoint: يرجع الرد الخام
-app.get("/proxy/debug-balances", async (req, res) => {
+// ✅ الأوامر المفتوحة
+app.get("/proxy/orders/open", async (req, res) => {
   try {
-    const endpoint = "/api/v4/spot/accounts";
-    const url = `https://api.gateio.ws${endpoint}`;
-    const { signature, timestamp } = await signRequest("GET", endpoint);
-
-    const r = await fetch(url, {
-      method: "GET",
-      headers: {
-        "KEY": API_KEY,
-        "SIGN": signature,
-        "Timestamp": timestamp,
-        "Content-Type": "application/json",
-      },
-    });
-
-    const text = await r.text();
-    res.status(r.status).json({
-      status: r.status,
-      preview: text.slice(0, 500) // أول 500 حرف
-    });
+    const result = await spotApi.listSpotOrders({ status: "open" });
+    res.json(result.body);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get("/healthz", (req, res) => res.status(200).send("OK"));
+// ✅ إنشاء أمر (شراء / بيع)
+app.post("/proxy/orders", async (req, res) => {
+  try {
+    const order = {
+      currency_pair: req.body.currency_pair, // "BTC_USDT"
+      type: req.body.type || "limit",       // "limit" or "market"
+      side: req.body.side,                  // "buy" or "sell"
+      amount: req.body.amount,              // "0.001"
+      price: req.body.price                 // مطلوب فقط للـ LIMIT
+    };
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Debug Proxy يعمل على المنفذ ${PORT}`));
+    const result = await spotApi.createSpotOrder(order);
+    res.json(result.body);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ✅ إلغاء أمر
+app.delete("/proxy/orders/:id", async (req, res) => {
+  try {
+    const result = await spotApi.cancelSpotOrder(req.params.id, { currency_pair: req.query.currency_pair });
+    res.json(result.body);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ✅ سجل الأوامر
+app.get("/proxy/orders/history", async (req, res) => {
+  try {
+    const result = await spotApi.listSpotOrders({ status: "finished" });
+    res.json(result.body);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 🚀 تشغيل السيرفر
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));
