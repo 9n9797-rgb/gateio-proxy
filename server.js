@@ -10,18 +10,24 @@ app.use(cors());
 const API_KEY = process.env.GATEIO_API_KEY;
 const API_SECRET = process.env.GATEIO_API_SECRET;
 
-// ✅ دالة التوقيع مع إصلاح الـ Timestamp + Debug Logs
-function signRequest(method, endpoint, query_string = "", body = "") {
-  // التوقيت الصحيح (بالثواني)
-  const ts = Math.floor(Date.now() / 1000).toString();
+// ✅ دالة تجيب توقيت Gate.io (ثواني Unix)
+async function getServerTime() {
+  const r = await fetch("https://api.gateio.ws/api/v4/time");
+  const data = await r.json();
+  return data.server_time.toString();
+}
+
+// ✅ دالة التوقيع (مع Debug Logs)
+async function signRequest(method, endpoint, query_string = "", body = "") {
+  const ts = await getServerTime(); // 🕒 التوقيت من Gate.io نفسه
 
   const body_str = body && Object.keys(body).length > 0 ? JSON.stringify(body) : "";
   const payload = [method.toUpperCase(), endpoint, query_string, body_str, ts].join("\n");
 
-  // 📝 Debug logs (تظهر في Render Live Tail)
+  // 📝 Debug logs
   console.log("=== SIGN DEBUG ===");
   console.log("Payload:\n", payload);
-  console.log("Timestamp:", ts);
+  console.log("Timestamp (Gate.io):", ts);
 
   const signature = crypto
     .createHmac("sha512", API_SECRET)
@@ -39,7 +45,7 @@ app.get("/proxy/balances", async (req, res) => {
   try {
     const endpoint = "/api/v4/spot/accounts";
     const url = `https://api.gateio.ws${endpoint}`;
-    const { signature, timestamp } = signRequest("GET", endpoint);
+    const { signature, timestamp } = await signRequest("GET", endpoint);
 
     const r = await fetch(url, {
       method: "GET",
@@ -64,7 +70,7 @@ app.post("/proxy/orders", async (req, res) => {
     const endpoint = "/api/v4/spot/orders";
     const url = `https://api.gateio.ws${endpoint}`;
     const body = req.body;
-    const { signature, timestamp } = signRequest("POST", endpoint, "", body);
+    const { signature, timestamp } = await signRequest("POST", endpoint, "", body);
 
     const r = await fetch(url, {
       method: "POST",
