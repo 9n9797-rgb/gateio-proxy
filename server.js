@@ -9,6 +9,14 @@ dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
+// أضف هذا في server.js بعد app.use(express.json());
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use(express.static(__dirname));
 
 // إعداد Gate API Client
 const client = new GateApi.ApiClient();
