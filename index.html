@@ -1019,24 +1019,44 @@ async function runBt() {
 }
 
 function renderBacktestResult(d) {
-  const retColor  = d.total_return >= 0 ? 'var(--green)' : 'var(--red)';
-  const annColor  = d.annualized_return >= 0 ? 'var(--green)' : 'var(--red)';
-  const alphaColor= d.alpha >= 0 ? 'var(--green)' : 'var(--red)';
-  const bhColor   = d.buy_hold_return >= 0 ? 'var(--blue)' : 'var(--red)';
   const sign = v => v >= 0 ? '+' : '';
+  const col  = v => v >= 0 ? 'var(--green)' : 'var(--red)';
+  const cmp  = d.comparison || {};
+  const basic = cmp.basic || {}, mom = cmp.momentum || {}, bh = cmp.buy_hold || {};
 
-  // Trade rows
-  const tradeRows = (d.trades || []).slice().reverse().map(t => {
-    const color = t.profit_pct >= 0 ? 'var(--green)' : 'var(--red)';
-    const bg    = t.profit_pct >= 0 ? '#0d2a14' : '#2a0d0d';
-    const reasonMap = { 'وقف_خسارة':'🛑 وقف خسارة', 'تشبع_شرائي':'📈 تشبع شرائي', 'ضعف_مؤشرات':'⬇️ ضعف مؤشرات', 'نهاية_الفترة':'⏹ نهاية الفترة' };
+  // Comparison table
+  const cmpRows = [
+    { label: 'إجمالي العائد',  b: basic.total_return,      m: mom.total_return,      isBh: true,  bhVal: bh.total_return },
+    { label: 'العائد السنوي',  b: basic.annualized_return, m: mom.annualized_return, isBh: false },
+    { label: 'نسبة الفوز %',   b: basic.win_rate,          m: mom.win_rate,          isBh: false },
+    { label: 'أقصى تراجع',     b: -basic.max_drawdown,     m: -mom.max_drawdown,     isBh: false },
+    { label: 'عدد الصفقات',    b: basic.total_trades,      m: mom.total_trades,      isBh: false },
+  ].map(r => {
+    const better = r.m >= r.b;
+    return `<tr>
+      <td style="padding:7px 10px;font-size:12px;color:var(--muted)">${r.label}</td>
+      <td style="padding:7px 10px;font-size:12px;text-align:center;direction:ltr;color:${col(r.b)}">${sign(r.b)}${r.b}%${r.label==='عدد الصفقات'?'':''}</td>
+      <td style="padding:7px 10px;font-size:13px;font-weight:700;text-align:center;direction:ltr;color:${col(r.m)};background:${better?'#0d2a14':'#2a0d0d'}">${sign(r.m)}${r.m}%</td>
+      ${r.isBh ? `<td style="padding:7px 10px;font-size:12px;text-align:center;direction:ltr;color:var(--blue)">${sign(r.bhVal)}${r.bhVal}%</td>` : '<td></td>'}
+    </tr>`;
+  }).join('');
+
+  // Reason map
+  const reasonMap = {
+    'وقف_خسارة':'🛑 وقف خسارة','تشبع_شرائي':'📈 تشبع شرائي',
+    'ضعف_مؤشرات':'⬇️ ضعف مؤشرات','نهاية_الفترة':'⏹ نهاية الفترة',
+    'انعكاس_MACD':'🔄 انعكاس MACD'
+  };
+  const tradeRows = (d.trades||[]).slice().reverse().map(t => {
+    const c = t.profit_pct>=0?'var(--green)':'var(--red)';
+    const bg= t.profit_pct>=0?'#0d2a14':'#2a0d0d';
     return `<div class="bt-trade-item">
       <div class="bt-trade-left">
         <b>${t.entry_date}</b> ← <b>${t.exit_date}</b><br>
-        دخول $${fmt(t.entry_price)} ← خروج $${fmt(t.exit_price)}<br>
-        <span style="color:var(--muted)">${reasonMap[t.exit_reason]||t.exit_reason} · ${t.days_held} يوم</span>
+        $${fmt(t.entry_price)} → $${fmt(t.exit_price)}
+        <span style="color:var(--muted)"> · ${reasonMap[t.exit_reason]||t.exit_reason} · ${t.days_held}ي</span>
       </div>
-      <div class="bt-trade-pct" style="color:${color};background:${bg};border-radius:8px;padding:4px 10px">
+      <div class="bt-trade-pct" style="color:${c};background:${bg};border-radius:8px;padding:4px 10px">
         ${sign(t.profit_pct)}${t.profit_pct}%
       </div>
     </div>`;
@@ -1044,39 +1064,48 @@ function renderBacktestResult(d) {
 
   document.getElementById('btResult').innerHTML = `
     <div class="bt-verdict" style="background:${d.verdict_color}22;border-color:${d.verdict_color};color:${d.verdict_color}">
-      ${d.verdict}
+      🧠 مع فلتر الزخم (MACD+ROC): ${d.verdict}
     </div>
 
+    <!-- Comparison table -->
+    <div style="padding:12px 16px 0">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">مقارنة الاستراتيجيات</div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--card2)">
+              <th style="padding:7px 10px;font-size:10px;color:var(--muted);text-align:right;font-weight:600">المقياس</th>
+              <th style="padding:7px 10px;font-size:10px;color:var(--muted);text-align:center;font-weight:600">بدون فلتر</th>
+              <th style="padding:7px 10px;font-size:10px;color:var(--blue);text-align:center;font-weight:600">مع MACD ✨</th>
+              <th style="padding:7px 10px;font-size:10px;color:var(--muted);text-align:center;font-weight:600">B&H</th>
+            </tr>
+          </thead>
+          <tbody>${cmpRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Metrics for momentum strategy -->
     <div class="bt-metrics">
       <div class="bt-metric">
         <div class="bt-metric-label">إجمالي العائد</div>
-        <div class="bt-metric-val" style="color:${retColor}">${sign(d.total_return)}${d.total_return}%</div>
+        <div class="bt-metric-val" style="color:${col(d.total_return)}">${sign(d.total_return)}${d.total_return}%</div>
         <div class="bt-metric-sub">$10,000 → $${fmt(d.final_value)}</div>
       </div>
       <div class="bt-metric">
         <div class="bt-metric-label">العائد السنوي</div>
-        <div class="bt-metric-val" style="color:${annColor}">${sign(d.annualized_return)}${d.annualized_return}%</div>
+        <div class="bt-metric-val" style="color:${col(d.annualized_return)}">${sign(d.annualized_return)}${d.annualized_return}%</div>
         <div class="bt-metric-sub">معدل سنوي</div>
-      </div>
-      <div class="bt-metric">
-        <div class="bt-metric-label">Buy & Hold</div>
-        <div class="bt-metric-val" style="color:${bhColor}">${sign(d.buy_hold_return)}${d.buy_hold_return}%</div>
-        <div class="bt-metric-sub">لو اشتريت وانتظرت</div>
-      </div>
-      <div class="bt-metric">
-        <div class="bt-metric-label">التفوق على السوق</div>
-        <div class="bt-metric-val" style="color:${alphaColor}">${sign(d.alpha)}${d.alpha}%</div>
-        <div class="bt-metric-sub">الاستراتيجية - Buy&Hold</div>
       </div>
       <div class="bt-metric">
         <div class="bt-metric-label">نسبة الفوز</div>
         <div class="bt-metric-val" style="color:${d.win_rate>=50?'var(--green)':'var(--red)'}">${d.win_rate}%</div>
-        <div class="bt-metric-sub">${d.winning_trades} ربح / ${d.losing_trades} خسارة</div>
+        <div class="bt-metric-sub">${d.winning_trades}✅ / ${d.losing_trades}❌</div>
       </div>
       <div class="bt-metric">
         <div class="bt-metric-label">أقصى تراجع</div>
         <div class="bt-metric-val" style="color:var(--red)">-${d.max_drawdown}%</div>
-        <div class="bt-metric-sub">أكبر انخفاض من القمة</div>
+        <div class="bt-metric-sub">أكبر انخفاض</div>
       </div>
       <div class="bt-metric">
         <div class="bt-metric-label">متوسط الربح</div>
@@ -1090,54 +1119,56 @@ function renderBacktestResult(d) {
       </div>
     </div>
 
-    <div style="padding:8px 16px 4px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase">منحنى رأس المال</div>
+    <div style="padding:8px 16px 4px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase">منحنى رأس المال — بدون فلتر (برتقالي) vs مع MACD (أخضر)</div>
     <div class="bt-chart-wrap"><canvas id="btChart"></canvas></div>
 
     <div class="bt-trades">
-      <div class="bt-trades-title">آخر ${(d.trades||[]).length} صفقة</div>
-      ${tradeRows || '<div style="color:var(--muted);font-size:13px">لا توجد صفقات</div>'}
+      <div class="bt-trades-title">آخر ${(d.trades||[]).length} صفقة (مع الفلتر)</div>
+      ${tradeRows||'<div style="color:var(--muted);font-size:13px">لا توجد صفقات</div>'}
     </div>
 
     <div class="bt-honest">
-      <b>⚠️ تنبيه مهم:</b> هذا اختبار افتراضي على بيانات تاريخية.
-      النتائج الماضية <b>لا تضمن</b> نفس العوائد مستقبلاً.
-      العوائد الحقيقية ستختلف بسبب: الفجوات السعرية، رسوم التداول، والأخبار المفاجئة.
-      استخدم هذا كأداة تعليمية فقط لفهم سلوك الاستراتيجية، وليس كضمان للربح.
+      <b>⚠️ تنبيه:</b> هذا اختبار على بيانات تاريخية — النتائج الماضية <b>لا تضمن</b> نفس العوائد مستقبلاً.
     </div>`;
 
-  buildBtChart(d.equity_curve || []);
+  buildBtChart(d.equity_basic||[], d.equity_momentum||[]);
 }
 
-function buildBtChart(equity) {
+function buildBtChart(basicEq, momEq) {
   if (btChartInst) { btChartInst.destroy(); btChartInst = null; }
   const ctx = document.getElementById('btChart');
-  if (!ctx || !equity.length) return;
-  const labels = equity.map(e => {
+  if (!ctx) return;
+  const eq = momEq.length ? momEq : basicEq;
+  const labels = eq.map(e => {
     const d = new Date(e.time);
     return `${d.getMonth()+1}/${d.getFullYear().toString().slice(2)}`;
   });
-  const values = equity.map(e => e.value);
-  const maxV = Math.max(...values);
+  // Align basicEq to same length as labels (may differ slightly)
+  const basicVals = labels.map((_, i) => basicEq[Math.min(i, basicEq.length-1)]?.value ?? null);
+  const momVals   = momEq.map(e => e.value);
   btChartInst = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets: [
-      { label:'رأس المال', data: values,
-        borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,.1)',
-        fill: true, tension: .35, pointRadius: 0, borderWidth: 2 },
-      { label:'$10,000', data: equity.map(() => 10000),
-        borderColor:'#30363d', borderDash:[4,3], borderWidth:1,
-        pointRadius:0, fill:false }
+      { label:'مع MACD', data:momVals,
+        borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,.08)',
+        fill:true, tension:.35, pointRadius:0, borderWidth:2 },
+      { label:'بدون فلتر', data:basicVals,
+        borderColor:'#f0883e', backgroundColor:'transparent',
+        fill:false, tension:.35, pointRadius:0, borderWidth:1.5, borderDash:[3,2] },
+      { label:'$10,000', data:eq.map(()=>10000),
+        borderColor:'#30363d', borderDash:[4,3], borderWidth:1, pointRadius:0, fill:false }
     ]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      animation: { duration: 400 },
-      plugins: { legend:{ display:false },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:{duration:400},
+      plugins:{
+        legend:{ display:true, labels:{ color:'#7d8590', font:{size:10}, boxWidth:12 } },
         tooltip:{ backgroundColor:'#161b22', borderColor:'#30363d', borderWidth:1,
           titleColor:'#7d8590', bodyColor:'#e6edf3',
-          callbacks:{ label: c => ` $${fmt(c.raw)}` } } },
-      scales: {
-        x: { grid:{ color:'#21262d' }, ticks:{ color:'#7d8590', maxTicksLimit:6, font:{size:10} } },
-        y: { grid:{ color:'#21262d' }, ticks:{ color:'#7d8590', font:{size:10}, callback: v => `$${fmt(v)}` } }
+          callbacks:{ label: c => ` ${c.dataset.label}: $${fmt(c.raw)}` } }
+      },
+      scales:{
+        x:{ grid:{color:'#21262d'}, ticks:{color:'#7d8590',maxTicksLimit:6,font:{size:10}} },
+        y:{ grid:{color:'#21262d'}, ticks:{color:'#7d8590',font:{size:10},callback:v=>`$${fmt(v)}`} }
       }
     }
   });

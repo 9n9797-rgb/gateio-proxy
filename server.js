@@ -452,6 +452,29 @@ function calculateMA(closes, period = 20) {
   });
 }
 
+function calculateEMA(values, period) {
+  const k   = 2 / (period + 1);
+  const ema = [values[0] ?? 0];
+  for (let i = 1; i < values.length; i++)
+    ema.push((values[i] ?? ema[i-1]) * k + ema[i-1] * (1 - k));
+  return ema;
+}
+
+function calculateROC(closes, period = 20) {
+  return closes.map((c, i) =>
+    i < period || closes[i-period] === 0 ? null
+      : ((c - closes[i-period]) / closes[i-period]) * 100
+  );
+}
+
+function calculateMACD(closes) {
+  const ema12  = calculateEMA(closes, 12);
+  const ema26  = calculateEMA(closes, 26);
+  const line   = ema12.map((v, i) => v - ema26[i]);
+  const signal = calculateEMA(line, 9);
+  return { line, signal, hist: line.map((v, i) => v - signal[i]) };
+}
+
 // ===== تحليل التجميع =====
 app.get("/proxy/analyze/:pair", async (req, res) => {
   const pair = req.params.pair.toUpperCase();
@@ -774,28 +797,17 @@ function getOBVTrendAt(obv, idx) {
   return 'neutral';
 }
 
-function runBacktest(candles, initialCapital = 10000) {
-  const n       = candles.length;
-  const closes  = candles.map(c => parseFloat(c.close) || 0);
-  const volumes = candles.map(c => parseFloat(c.volume) || 0);
-  const times   = candles.map(c => c.time);
-
-  // Pre-compute indicators for all candles
+// simulate one pass of the strategy; momentumFilter=true uses MACD+ROC hold logic
+function _simulate(closes, volumes, times, macdData, rocArr, initialCapital, momentumFilter) {
+  const n       = closes.length;
   const rsiArr  = calculateRSI(closes, 14);
   const obvArr  = calculateOBV(closes, volumes);
   const ma20Arr = calculateMA(closes, 20);
 
-  let cash = initialCapital;
-  let shares = 0;
-  let inPosition = false;
-  let entryPrice = 0;
-  let entryDate  = null;
-  let entryIdx   = 0;
-
-  const trades = [];
-  const equity = [];
-
-  const START = 22; // enough history for MA20 + OBV
+  let cash = initialCapital, shares = 0, inPosition = false;
+  let entryPrice = 0, entryDate = null;
+  const trades = [], equity = [];
+  const START   = 30;
 
   for (let i = START; i < n; i++) {
     const rsi      = rsiArr[i]  ?? 50;
@@ -804,108 +816,157 @@ function runBacktest(candles, initialCapital = 10000) {
     const obvTrend = getOBVTrendAt(obvArr, i);
     const aboveMA  = close > ma20;
 
-    // Entry: RSI في نطاق التجميع + OBV صاعد + فوق MA20
-    const buySignal  = !inPosition && rsi >= 33 && rsi <= 58 && obvTrend === 'rising' && aboveMA;
-    // Exit: تشبع شرائي أو ضعف مؤشرات أو وقف خسارة 8%
-    const stopLoss   = inPosition && close < entryPrice * 0.92;
-    const sellSignal = inPosition && (rsi > 68 || (!aboveMA && obvTrend === 'falling') || stopLoss);
+    // === Momentum filter (MACD + ROC) ===
+    const roc20       = rocArr[i] ?? 0;
+    const macdAbove   = macdData.line[i] > macdData.signal[i];
+    const momentumOn  = momentumFilter && macdAbove && roc20 > 3; // MACD صاعد + سعر ارتفع >3% خلال 20 يوم
+
+    // ---- Entry ----
+    const buySignal = !inPosition
+      && rsi >= 33 && rsi <= 60
+      && obvTrend === 'rising'
+      && aboveMA;
+
+    // ---- Exit ----
+    const stopLoss8     = inPosition && close < entryPrice * 0.92;
+    // بدون فلتر: اخرج لو RSI > 68 أو ضعف مؤشرات
+    // مع فلتر: ابقَ إذا الزخم لا يزال قوياً (MACD صاعد + ROC موجب) حتى RSI > 80
+    const rsiExit       = inPosition && (momentumFilter
+      ? (rsi > 80 && !momentumOn)
+      : rsi > 68);
+    const trendExit     = inPosition && !aboveMA && obvTrend === 'falling' && roc20 < -2;
+    const macdFlip      = momentumFilter && inPosition
+      && !macdAbove && roc20 < -1 && rsi < 50; // MACD انقلب سلبي + سعر هابط
+
+    const sellSignal = stopLoss8 || rsiExit || trendExit || macdFlip;
 
     if (buySignal) {
-      shares     = cash / close;
-      entryPrice = close;
-      entryDate  = times[i];
-      entryIdx   = i;
-      cash       = 0;
-      inPosition = true;
+      shares = cash / close; entryPrice = close; entryDate = times[i]; cash = 0; inPosition = true;
     } else if (sellSignal) {
-      const exitVal   = shares * close;
       const profitPct = ((close - entryPrice) / entryPrice) * 100;
-      const daysHeld  = Math.round((times[i] - entryDate) / 86400000);
+      const reason    = stopLoss8 ? 'وقف_خسارة'
+        : rsiExit   ? 'تشبع_شرائي'
+        : macdFlip  ? 'انعكاس_MACD'
+        : 'ضعف_مؤشرات';
       trades.push({
         entry_date:  new Date(entryDate).toISOString().split('T')[0],
         exit_date:   new Date(times[i]).toISOString().split('T')[0],
         entry_price: Math.round(entryPrice * 100) / 100,
         exit_price:  Math.round(close * 100) / 100,
         profit_pct:  Math.round(profitPct * 100) / 100,
-        days_held:   daysHeld,
-        exit_reason: stopLoss ? 'وقف_خسارة' : rsi > 68 ? 'تشبع_شرائي' : 'ضعف_مؤشرات'
+        days_held:   Math.round((times[i] - entryDate) / 86400000),
+        exit_reason: reason
       });
-      cash       = exitVal;
-      shares     = 0;
-      inPosition = false;
+      cash = shares * close; shares = 0; inPosition = false;
     }
-
     const val = inPosition ? shares * close : cash;
     if (i % 2 === 0) equity.push({ time: times[i], value: Math.round(val * 100) / 100 });
   }
 
-  // Close open position at last candle
   if (inPosition) {
-    const lastClose = closes[n - 1];
-    const profitPct = ((lastClose - entryPrice) / entryPrice) * 100;
+    const lc = closes[n-1];
     trades.push({
       entry_date: new Date(entryDate).toISOString().split('T')[0],
-      exit_date:  new Date(times[n - 1]).toISOString().split('T')[0],
+      exit_date:  new Date(times[n-1]).toISOString().split('T')[0],
       entry_price: Math.round(entryPrice * 100) / 100,
-      exit_price:  Math.round(lastClose * 100) / 100,
-      profit_pct:  Math.round(profitPct * 100) / 100,
-      days_held:   Math.round((times[n - 1] - entryDate) / 86400000),
+      exit_price:  Math.round(lc * 100) / 100,
+      profit_pct:  Math.round(((lc-entryPrice)/entryPrice)*10000)/100,
+      days_held:   Math.round((times[n-1]-entryDate)/86400000),
       exit_reason: 'نهاية_الفترة'
     });
-    cash = shares * lastClose;
+    cash = shares * lc;
   }
 
-  const finalValue   = Math.round(cash * 100) / 100;
-  const totalReturn  = ((finalValue - initialCapital) / initialCapital) * 100;
-  const periodDays   = (times[n - 1] - times[START]) / 86400000;
-  const annualized   = periodDays > 30
-    ? (Math.pow(finalValue / initialCapital, 365 / periodDays) - 1) * 100 : totalReturn;
-  const buyHold      = ((closes[n - 1] - closes[START]) / closes[START]) * 100;
+  const final      = Math.round(cash * 100) / 100;
+  const totalRet   = ((final - initialCapital) / initialCapital) * 100;
+  const periodD    = (times[n-1] - times[START]) / 86400000;
+  const ann        = periodD > 30 ? (Math.pow(final/initialCapital, 365/periodD)-1)*100 : totalRet;
+  const bh         = ((closes[n-1] - closes[START]) / closes[START]) * 100;
+  const wins       = trades.filter(t => t.profit_pct > 0);
+  const losses     = trades.filter(t => t.profit_pct <= 0);
+  const winRate    = trades.length ? (wins.length/trades.length)*100 : 0;
+  const avgWin     = wins.length   ? wins.reduce((a,t)=>a+t.profit_pct,0)/wins.length : 0;
+  const avgLoss    = losses.length ? losses.reduce((a,t)=>a+t.profit_pct,0)/losses.length : 0;
 
-  const winners   = trades.filter(t => t.profit_pct > 0);
-  const losers    = trades.filter(t => t.profit_pct <= 0);
-  const winRate   = trades.length > 0 ? (winners.length / trades.length) * 100 : 0;
-  const avgWin    = winners.length > 0 ? winners.reduce((a, t) => a + t.profit_pct, 0) / winners.length : 0;
-  const avgLoss   = losers.length  > 0 ? losers.reduce((a, t)  => a + t.profit_pct, 0) / losers.length  : 0;
-
-  // Max drawdown
   let peak = initialCapital, maxDD = 0;
   equity.forEach(e => {
     if (e.value > peak) peak = e.value;
-    const dd = peak > 0 ? ((peak - e.value) / peak) * 100 : 0;
+    const dd = peak > 0 ? ((peak - e.value)/peak)*100 : 0;
     if (dd > maxDD) maxDD = dd;
   });
 
-  // Verdict
+  const alpha = totalRet - bh;
   let verdict, verdictColor;
-  const alpha = totalReturn - buyHold; // الفرق عن buy&hold
-  if (annualized >= 30 && winRate >= 55) { verdict = 'ممتاز — النظام يتفوق على السوق بشكل واضح'; verdictColor = '#3fb950'; }
-  else if (annualized >= 15 && winRate >= 50) { verdict = 'جيد — النظام مربح ومتفوق على المتوسط'; verdictColor = '#58c96a'; }
-  else if (annualized >= 5  && totalReturn > buyHold) { verdict = 'مقبول — أفضل من Buy & Hold لكن بفارق بسيط'; verdictColor = '#d29922'; }
-  else if (totalReturn > 0) { verdict = 'ضعيف — النظام مربح لكن Buy & Hold أفضل منه'; verdictColor = '#f0883e'; }
-  else { verdict = 'خسائر — النظام لم يكن مربحاً في هذه الفترة'; verdictColor = '#f85149'; }
+  if      (ann >= 30 && winRate >= 55) { verdict='ممتاز — النظام يتفوق على السوق بشكل واضح'; verdictColor='#3fb950'; }
+  else if (ann >= 15 && winRate >= 50) { verdict='جيد — النظام مربح ومتفوق على المتوسط';     verdictColor='#58c96a'; }
+  else if (ann >= 5  && totalRet > bh) { verdict='مقبول — أفضل من Buy & Hold لكن بفارق بسيط';verdictColor='#d29922'; }
+  else if (totalRet > 0)               { verdict='ضعيف — النظام مربح لكن Buy & Hold أفضل منه'; verdictColor='#f0883e'; }
+  else                                 { verdict='خسائر — النظام لم يكن مربحاً في هذه الفترة'; verdictColor='#f85149'; }
 
   return {
-    initial_capital:  initialCapital,
-    final_value:      finalValue,
-    total_return:     Math.round(totalReturn  * 100) / 100,
-    annualized_return:Math.round(annualized   * 100) / 100,
-    buy_hold_return:  Math.round(buyHold      * 100) / 100,
-    alpha:            Math.round(alpha        * 100) / 100,
-    total_trades:     trades.length,
-    winning_trades:   winners.length,
-    losing_trades:    losers.length,
-    win_rate:         Math.round(winRate * 100) / 100,
-    avg_win:          Math.round(avgWin  * 100) / 100,
-    avg_loss:         Math.round(avgLoss * 100) / 100,
-    max_drawdown:     Math.round(maxDD   * 100) / 100,
-    best_trade:       trades.length > 0 ? Math.max(...trades.map(t => t.profit_pct)) : 0,
-    worst_trade:      trades.length > 0 ? Math.min(...trades.map(t => t.profit_pct)) : 0,
-    period_days:      Math.round(periodDays),
+    final_value:       final,
+    total_return:      Math.round(totalRet  * 100) / 100,
+    annualized_return: Math.round(ann       * 100) / 100,
+    buy_hold_return:   Math.round(bh        * 100) / 100,
+    alpha:             Math.round(alpha     * 100) / 100,
+    total_trades:      trades.length,
+    winning_trades:    wins.length,
+    losing_trades:     losses.length,
+    win_rate:          Math.round(winRate   * 100) / 100,
+    avg_win:           Math.round(avgWin    * 100) / 100,
+    avg_loss:          Math.round(avgLoss   * 100) / 100,
+    max_drawdown:      Math.round(maxDD     * 100) / 100,
+    best_trade:        trades.length ? Math.max(...trades.map(t=>t.profit_pct)) : 0,
+    worst_trade:       trades.length ? Math.min(...trades.map(t=>t.profit_pct)) : 0,
+    period_days:       Math.round(periodD),
     verdict,
-    verdict_color:    verdictColor,
-    trades:           trades.slice(-15),
-    equity_curve:     equity
+    verdict_color:     verdictColor,
+    trades:            trades.slice(-15),
+    equity_curve:      equity
+  };
+}
+
+function runBacktest(candles, initialCapital = 10000) {
+  const closes  = candles.map(c => parseFloat(c.close)  || 0);
+  const volumes = candles.map(c => parseFloat(c.volume) || 0);
+  const times   = candles.map(c => c.time);
+  const macdData = calculateMACD(closes);
+  const rocArr   = calculateROC(closes, 20);
+
+  const basic    = _simulate(closes, volumes, times, macdData, rocArr, initialCapital, false);
+  const momentum = _simulate(closes, volumes, times, macdData, rocArr, initialCapital, true);
+
+  // Pick the equity curve of the momentum strategy for the chart
+  // Return both for comparison
+  return {
+    initial_capital: initialCapital,
+    // Main result = momentum strategy
+    ...momentum,
+    // Comparison
+    comparison: {
+      basic: {
+        total_return:      basic.total_return,
+        annualized_return: basic.annualized_return,
+        win_rate:          basic.win_rate,
+        max_drawdown:      basic.max_drawdown,
+        total_trades:      basic.total_trades,
+        verdict:           basic.verdict
+      },
+      momentum: {
+        total_return:      momentum.total_return,
+        annualized_return: momentum.annualized_return,
+        win_rate:          momentum.win_rate,
+        max_drawdown:      momentum.max_drawdown,
+        total_trades:      momentum.total_trades,
+        verdict:           momentum.verdict
+      },
+      buy_hold: {
+        total_return: momentum.buy_hold_return
+      }
+    },
+    // Both equity curves for the chart
+    equity_basic:    basic.equity_curve,
+    equity_momentum: momentum.equity_curve
   };
 }
 
