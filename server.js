@@ -764,6 +764,204 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
   }
 });
 
+// ===== Backtesting Engine =====
+function getOBVTrendAt(obv, idx) {
+  if (idx < 10) return 'neutral';
+  const recent = obv.slice(idx - 4, idx + 1).reduce((a, b) => a + b, 0) / 5;
+  const older  = obv.slice(idx - 9, idx - 4).reduce((a, b) => a + b, 0) / 5;
+  if (recent > older * 1.005) return 'rising';
+  if (recent < older * 0.995) return 'falling';
+  return 'neutral';
+}
+
+function runBacktest(candles, initialCapital = 10000) {
+  const n       = candles.length;
+  const closes  = candles.map(c => parseFloat(c.close) || 0);
+  const volumes = candles.map(c => parseFloat(c.volume) || 0);
+  const times   = candles.map(c => c.time);
+
+  // Pre-compute indicators for all candles
+  const rsiArr  = calculateRSI(closes, 14);
+  const obvArr  = calculateOBV(closes, volumes);
+  const ma20Arr = calculateMA(closes, 20);
+
+  let cash = initialCapital;
+  let shares = 0;
+  let inPosition = false;
+  let entryPrice = 0;
+  let entryDate  = null;
+  let entryIdx   = 0;
+
+  const trades = [];
+  const equity = [];
+
+  const START = 22; // enough history for MA20 + OBV
+
+  for (let i = START; i < n; i++) {
+    const rsi      = rsiArr[i]  ?? 50;
+    const ma20     = ma20Arr[i] ?? closes[i];
+    const close    = closes[i];
+    const obvTrend = getOBVTrendAt(obvArr, i);
+    const aboveMA  = close > ma20;
+
+    // Entry: RSI في نطاق التجميع + OBV صاعد + فوق MA20
+    const buySignal  = !inPosition && rsi >= 33 && rsi <= 58 && obvTrend === 'rising' && aboveMA;
+    // Exit: تشبع شرائي أو ضعف مؤشرات أو وقف خسارة 8%
+    const stopLoss   = inPosition && close < entryPrice * 0.92;
+    const sellSignal = inPosition && (rsi > 68 || (!aboveMA && obvTrend === 'falling') || stopLoss);
+
+    if (buySignal) {
+      shares     = cash / close;
+      entryPrice = close;
+      entryDate  = times[i];
+      entryIdx   = i;
+      cash       = 0;
+      inPosition = true;
+    } else if (sellSignal) {
+      const exitVal   = shares * close;
+      const profitPct = ((close - entryPrice) / entryPrice) * 100;
+      const daysHeld  = Math.round((times[i] - entryDate) / 86400000);
+      trades.push({
+        entry_date:  new Date(entryDate).toISOString().split('T')[0],
+        exit_date:   new Date(times[i]).toISOString().split('T')[0],
+        entry_price: Math.round(entryPrice * 100) / 100,
+        exit_price:  Math.round(close * 100) / 100,
+        profit_pct:  Math.round(profitPct * 100) / 100,
+        days_held:   daysHeld,
+        exit_reason: stopLoss ? 'وقف_خسارة' : rsi > 68 ? 'تشبع_شرائي' : 'ضعف_مؤشرات'
+      });
+      cash       = exitVal;
+      shares     = 0;
+      inPosition = false;
+    }
+
+    const val = inPosition ? shares * close : cash;
+    if (i % 2 === 0) equity.push({ time: times[i], value: Math.round(val * 100) / 100 });
+  }
+
+  // Close open position at last candle
+  if (inPosition) {
+    const lastClose = closes[n - 1];
+    const profitPct = ((lastClose - entryPrice) / entryPrice) * 100;
+    trades.push({
+      entry_date: new Date(entryDate).toISOString().split('T')[0],
+      exit_date:  new Date(times[n - 1]).toISOString().split('T')[0],
+      entry_price: Math.round(entryPrice * 100) / 100,
+      exit_price:  Math.round(lastClose * 100) / 100,
+      profit_pct:  Math.round(profitPct * 100) / 100,
+      days_held:   Math.round((times[n - 1] - entryDate) / 86400000),
+      exit_reason: 'نهاية_الفترة'
+    });
+    cash = shares * lastClose;
+  }
+
+  const finalValue   = Math.round(cash * 100) / 100;
+  const totalReturn  = ((finalValue - initialCapital) / initialCapital) * 100;
+  const periodDays   = (times[n - 1] - times[START]) / 86400000;
+  const annualized   = periodDays > 30
+    ? (Math.pow(finalValue / initialCapital, 365 / periodDays) - 1) * 100 : totalReturn;
+  const buyHold      = ((closes[n - 1] - closes[START]) / closes[START]) * 100;
+
+  const winners   = trades.filter(t => t.profit_pct > 0);
+  const losers    = trades.filter(t => t.profit_pct <= 0);
+  const winRate   = trades.length > 0 ? (winners.length / trades.length) * 100 : 0;
+  const avgWin    = winners.length > 0 ? winners.reduce((a, t) => a + t.profit_pct, 0) / winners.length : 0;
+  const avgLoss   = losers.length  > 0 ? losers.reduce((a, t)  => a + t.profit_pct, 0) / losers.length  : 0;
+
+  // Max drawdown
+  let peak = initialCapital, maxDD = 0;
+  equity.forEach(e => {
+    if (e.value > peak) peak = e.value;
+    const dd = peak > 0 ? ((peak - e.value) / peak) * 100 : 0;
+    if (dd > maxDD) maxDD = dd;
+  });
+
+  // Verdict
+  let verdict, verdictColor;
+  const alpha = totalReturn - buyHold; // الفرق عن buy&hold
+  if (annualized >= 30 && winRate >= 55) { verdict = 'ممتاز — النظام يتفوق على السوق بشكل واضح'; verdictColor = '#3fb950'; }
+  else if (annualized >= 15 && winRate >= 50) { verdict = 'جيد — النظام مربح ومتفوق على المتوسط'; verdictColor = '#58c96a'; }
+  else if (annualized >= 5  && totalReturn > buyHold) { verdict = 'مقبول — أفضل من Buy & Hold لكن بفارق بسيط'; verdictColor = '#d29922'; }
+  else if (totalReturn > 0) { verdict = 'ضعيف — النظام مربح لكن Buy & Hold أفضل منه'; verdictColor = '#f0883e'; }
+  else { verdict = 'خسائر — النظام لم يكن مربحاً في هذه الفترة'; verdictColor = '#f85149'; }
+
+  return {
+    initial_capital:  initialCapital,
+    final_value:      finalValue,
+    total_return:     Math.round(totalReturn  * 100) / 100,
+    annualized_return:Math.round(annualized   * 100) / 100,
+    buy_hold_return:  Math.round(buyHold      * 100) / 100,
+    alpha:            Math.round(alpha        * 100) / 100,
+    total_trades:     trades.length,
+    winning_trades:   winners.length,
+    losing_trades:    losers.length,
+    win_rate:         Math.round(winRate * 100) / 100,
+    avg_win:          Math.round(avgWin  * 100) / 100,
+    avg_loss:         Math.round(avgLoss * 100) / 100,
+    max_drawdown:     Math.round(maxDD   * 100) / 100,
+    best_trade:       trades.length > 0 ? Math.max(...trades.map(t => t.profit_pct)) : 0,
+    worst_trade:      trades.length > 0 ? Math.min(...trades.map(t => t.profit_pct)) : 0,
+    period_days:      Math.round(periodDays),
+    verdict,
+    verdict_color:    verdictColor,
+    trades:           trades.slice(-15),
+    equity_curve:     equity
+  };
+}
+
+// GET /proxy/backtest/:symbol?range=2y&type=stock|crypto
+app.get("/proxy/backtest/:symbol", async (req, res) => {
+  const symbol  = req.params.symbol.toUpperCase();
+  const type    = req.query.type === 'crypto' ? 'crypto' : 'stock';
+  const range   = ['1y','2y','3y','5y'].includes(req.query.range) ? req.query.range : '2y';
+  const capital = Math.min(parseInt(req.query.capital) || 10000, 1000000);
+
+  try {
+    let candles;
+
+    if (type === 'crypto') {
+      const pair  = symbol.includes('_') ? symbol : `${symbol}_USDT`;
+      const limit = range === '1y' ? 365 : range === '3y' ? 1095 : range === '5y' ? 1825 : 730;
+      const url   = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=${limit}`;
+      const r     = await withTimeout(fetch(url), 10000);
+      const raw   = await r.json();
+      if (!Array.isArray(raw) || raw.length < 30)
+        return res.json({ error: 'بيانات غير كافية', symbol });
+      candles = raw.map(c => ({
+        time: parseInt(c[0]) * 1000, open: parseFloat(c[5]),
+        high: parseFloat(c[3]),      low:  parseFloat(c[4]),
+        close: parseFloat(c[2]),     volume: parseFloat(c[1])
+      }));
+    } else {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
+      const r   = await withTimeout(fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+      }), 10000);
+      const json   = await r.json();
+      const result = json?.chart?.result?.[0];
+      if (!result) return res.json({ error: 'رمز السهم غير موجود', symbol });
+      const q   = result.indicators?.quote?.[0] || {};
+      const ts  = result.timestamp || [];
+      candles   = ts.map((t, i) => ({
+        time:   t * 1000,
+        open:   q.open?.[i]   ?? 0,
+        high:   q.high?.[i]   ?? 0,
+        low:    q.low?.[i]    ?? 0,
+        close:  q.close?.[i]  ?? 0,
+        volume: q.volume?.[i] ?? 0
+      })).filter(c => c.close > 0);
+    }
+
+    if (candles.length < 40)
+      return res.json({ error: 'البيانات غير كافية للاختبار', symbol });
+
+    const result = runBacktest(candles, capital);
+    res.json({ symbol, type, range, ...result });
+  } catch (e) {
+    res.json(upstreamError(e, { symbol }));
+  }
+});
+
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));

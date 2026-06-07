@@ -117,6 +117,28 @@
   /* Disclaimer */
   .disclaimer{margin:12px 16px 0;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:11px 13px;font-size:11px;color:var(--muted);line-height:1.6}
 
+  /* === Backtest tab === */
+  .bt-header{padding:14px 16px 10px;border-bottom:1px solid var(--border)}
+  .bt-controls{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .bt-range-btn{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;direction:ltr}
+  .bt-range-btn.active{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+  .bt-run-btn{margin-right:auto;background:var(--green);color:#000;border:none;border-radius:8px;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer}
+  .bt-verdict{margin:12px 16px 0;border-radius:12px;padding:13px 16px;font-size:14px;font-weight:600;border:1px solid}
+  .bt-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 16px}
+  .bt-metric{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+  .bt-metric-label{font-size:10px;color:var(--muted);margin-bottom:4px}
+  .bt-metric-val{font-size:20px;font-weight:700;direction:ltr}
+  .bt-metric-sub{font-size:10px;color:var(--muted);margin-top:2px}
+  .bt-chart-wrap{margin:0 16px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;height:180px}
+  .bt-trades{padding:10px 16px}
+  .bt-trades-title{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+  .bt-trade-item{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:9px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+  .bt-trade-left{font-size:11px;color:var(--muted);direction:ltr}
+  .bt-trade-left b{color:var(--text);font-size:12px}
+  .bt-trade-pct{font-size:14px;font-weight:700;direction:ltr}
+  .bt-honest{margin:10px 16px 0;background:#1a1a2e;border:1px solid #30363d;border-radius:10px;padding:12px 14px;font-size:12px;color:var(--muted);line-height:1.7}
+  .bt-honest b{color:var(--text)}
+
   /* === Beginner guide === */
   .guide-block{margin:12px 16px 0;border-radius:12px;border:1px solid var(--border);overflow:hidden}
   .guide-header{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:var(--card2);cursor:pointer;user-select:none}
@@ -251,23 +273,26 @@
   <div id="newsContent" class="state"><div>اضغط تحليل لعرض الأخبار</div></div>
 </div>
 
+<div id="tabBacktest" class="tab-panel">
+  <div id="backtestContent" class="state"><div>اضغط "اختبر" لتشغيل الباكتست</div></div>
+</div>
+
 <!-- Bottom navigation -->
 <nav class="bottom-nav">
   <div class="nav-item active" id="navAnalysis" onclick="switchTab('analysis')">
-    <span class="nav-icon">📊</span>
-    <span class="nav-label">تحليل</span>
+    <span class="nav-icon">📊</span><span class="nav-label">تحليل</span>
   </div>
   <div class="nav-item" id="navRecommend" onclick="switchTab('recommend')">
-    <span class="nav-icon">🎯</span>
-    <span class="nav-label">توصية</span>
+    <span class="nav-icon">🎯</span><span class="nav-label">توصية</span>
   </div>
   <div class="nav-item" id="navCongress" onclick="switchTab('congress')">
-    <span class="nav-icon">🏛️</span>
-    <span class="nav-label">كونغرس</span>
+    <span class="nav-icon">🏛️</span><span class="nav-label">كونغرس</span>
   </div>
   <div class="nav-item" id="navNews" onclick="switchTab('news')">
-    <span class="nav-icon">📰</span>
-    <span class="nav-label">أخبار</span>
+    <span class="nav-icon">📰</span><span class="nav-label">أخبار</span>
+  </div>
+  <div class="nav-item" id="navBacktest" onclick="switchTab('backtest')">
+    <span class="nav-icon">⏱️</span><span class="nav-label">باكتست</span>
   </div>
 </nav>
 
@@ -283,8 +308,10 @@ let currentSym = 'AAPL';
 let activeTab = 'analysis';
 
 // Cache loaded data per-tab
-let tabData = { analysis: null, recommend: null, congress: null, news: null };
-let tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
+let tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null };
+let tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false };
+let btRange = '2y';
+let btChartInst = null;
 
 const STOCK_CHIPS = ['AAPL','MSFT','NVDA','META','GOOGL','AMZN','TSLA','AMD','TSM','NFLX'];
 const CRYPTO_CHIPS = ['BTC_USDT','ETH_USDT','SOL_USDT','BNB_USDT','XRP_USDT'];
@@ -309,8 +336,8 @@ function setType(type) {
   document.getElementById('symInput').value = currentSym;
   // Show/hide range tabs (crypto uses Gate.io directly, range irrelevant but keep for UX)
   // Reset all tabs
-  tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
-  tabData = { analysis: null, recommend: null, congress: null, news: null };
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false };
+  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null };
   onSearch();
 }
 
@@ -323,8 +350,8 @@ function quickSym(el, sym) {
   currentSym = sym;
   document.getElementById('symInput').value = sym;
   // Reset tab cache
-  tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
-  tabData = { analysis: null, recommend: null, congress: null, news: null };
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false };
+  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null };
   onSearch();
 }
 
@@ -364,15 +391,16 @@ function onSearch() {
 // ============================================================
 function switchTab(tab) {
   activeTab = tab;
-  // Update panels
-  ['analysis','recommend','congress','news'].forEach(t => {
+  ['analysis','recommend','congress','news','backtest'].forEach(t => {
     document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}`).classList.toggle('active', t === tab);
-    document.getElementById(`nav${t.charAt(0).toUpperCase()+t.slice(1)}`).classList.toggle('active', t === tab);
+    const nav = document.getElementById(`nav${t.charAt(0).toUpperCase()+t.slice(1)}`);
+    if (nav) nav.classList.toggle('active', t === tab);
   });
-  // Show range tabs only on analysis
   document.getElementById('rangeTabs').style.display = tab === 'analysis' ? 'flex' : 'none';
-  // Auto-fetch if not loaded
-  if (!tabLoaded[tab] && currentSym) loadTab(tab);
+  if (!tabLoaded[tab] && currentSym) {
+    if (tab === 'backtest') renderBacktestShell();
+    else loadTab(tab);
+  }
 }
 
 // ============================================================
@@ -942,9 +970,182 @@ function timeAgo(iso) {
 }
 
 // ============================================================
+// ============================================================
+// Backtest tab
+// ============================================================
+function renderBacktestShell() {
+  tabLoaded.backtest = true;
+  const sym = currentSym || 'AAPL';
+  document.getElementById('backtestContent').innerHTML = `
+    <div class="bt-header">
+      <div style="font-size:13px;color:var(--muted)">اختبار تاريخي للاستراتيجية على <b style="color:var(--text)">${sym}</b></div>
+      <div class="bt-controls">
+        ${['1y','2y','3y'].map(r =>
+          `<span class="bt-range-btn${r===btRange?' active':''}" onclick="setBtRange('${r}',this)">${r==='1y'?'سنة':'سنتان'+(r==='3y'?'ث':'')}</span>`
+        ).join('')}
+        <button class="bt-run-btn" onclick="runBt()">▶ اختبر</button>
+      </div>
+    </div>
+    <div id="btResult">
+      <div class="state" style="padding:40px">اضغط "اختبر" لتشغيل المحاكاة</div>
+    </div>`;
+}
+
+function setBtRange(r, el) {
+  btRange = r;
+  document.querySelectorAll('.bt-range-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+
+async function runBt() {
+  const sym = currentSym;
+  const btn = document.querySelector('.bt-run-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري...'; }
+  document.getElementById('btResult').innerHTML =
+    '<div class="state"><div class="spinner"></div><div>يحاكي الصفقات…</div></div>';
+  try {
+    const url = `/proxy/backtest/${sym}?type=${currentType}&range=${btRange}&capital=10000`;
+    const res = await fetch(url);
+    const d   = await res.json();
+    if (d.error) throw new Error(d.error);
+    tabData.backtest = d;
+    renderBacktestResult(d);
+  } catch(e) {
+    document.getElementById('btResult').innerHTML =
+      `<div class="state">❌<br><br>${e.message}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '▶ اختبر'; }
+  }
+}
+
+function renderBacktestResult(d) {
+  const retColor  = d.total_return >= 0 ? 'var(--green)' : 'var(--red)';
+  const annColor  = d.annualized_return >= 0 ? 'var(--green)' : 'var(--red)';
+  const alphaColor= d.alpha >= 0 ? 'var(--green)' : 'var(--red)';
+  const bhColor   = d.buy_hold_return >= 0 ? 'var(--blue)' : 'var(--red)';
+  const sign = v => v >= 0 ? '+' : '';
+
+  // Trade rows
+  const tradeRows = (d.trades || []).slice().reverse().map(t => {
+    const color = t.profit_pct >= 0 ? 'var(--green)' : 'var(--red)';
+    const bg    = t.profit_pct >= 0 ? '#0d2a14' : '#2a0d0d';
+    const reasonMap = { 'وقف_خسارة':'🛑 وقف خسارة', 'تشبع_شرائي':'📈 تشبع شرائي', 'ضعف_مؤشرات':'⬇️ ضعف مؤشرات', 'نهاية_الفترة':'⏹ نهاية الفترة' };
+    return `<div class="bt-trade-item">
+      <div class="bt-trade-left">
+        <b>${t.entry_date}</b> ← <b>${t.exit_date}</b><br>
+        دخول $${fmt(t.entry_price)} ← خروج $${fmt(t.exit_price)}<br>
+        <span style="color:var(--muted)">${reasonMap[t.exit_reason]||t.exit_reason} · ${t.days_held} يوم</span>
+      </div>
+      <div class="bt-trade-pct" style="color:${color};background:${bg};border-radius:8px;padding:4px 10px">
+        ${sign(t.profit_pct)}${t.profit_pct}%
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('btResult').innerHTML = `
+    <div class="bt-verdict" style="background:${d.verdict_color}22;border-color:${d.verdict_color};color:${d.verdict_color}">
+      ${d.verdict}
+    </div>
+
+    <div class="bt-metrics">
+      <div class="bt-metric">
+        <div class="bt-metric-label">إجمالي العائد</div>
+        <div class="bt-metric-val" style="color:${retColor}">${sign(d.total_return)}${d.total_return}%</div>
+        <div class="bt-metric-sub">$10,000 → $${fmt(d.final_value)}</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-metric-label">العائد السنوي</div>
+        <div class="bt-metric-val" style="color:${annColor}">${sign(d.annualized_return)}${d.annualized_return}%</div>
+        <div class="bt-metric-sub">معدل سنوي</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-metric-label">Buy & Hold</div>
+        <div class="bt-metric-val" style="color:${bhColor}">${sign(d.buy_hold_return)}${d.buy_hold_return}%</div>
+        <div class="bt-metric-sub">لو اشتريت وانتظرت</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-metric-label">التفوق على السوق</div>
+        <div class="bt-metric-val" style="color:${alphaColor}">${sign(d.alpha)}${d.alpha}%</div>
+        <div class="bt-metric-sub">الاستراتيجية - Buy&Hold</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-metric-label">نسبة الفوز</div>
+        <div class="bt-metric-val" style="color:${d.win_rate>=50?'var(--green)':'var(--red)'}">${d.win_rate}%</div>
+        <div class="bt-metric-sub">${d.winning_trades} ربح / ${d.losing_trades} خسارة</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-metric-label">أقصى تراجع</div>
+        <div class="bt-metric-val" style="color:var(--red)">-${d.max_drawdown}%</div>
+        <div class="bt-metric-sub">أكبر انخفاض من القمة</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-metric-label">متوسط الربح</div>
+        <div class="bt-metric-val" style="color:var(--green)">+${d.avg_win}%</div>
+        <div class="bt-metric-sub">لكل صفقة رابحة</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-metric-label">متوسط الخسارة</div>
+        <div class="bt-metric-val" style="color:var(--red)">${d.avg_loss}%</div>
+        <div class="bt-metric-sub">لكل صفقة خاسرة</div>
+      </div>
+    </div>
+
+    <div style="padding:8px 16px 4px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase">منحنى رأس المال</div>
+    <div class="bt-chart-wrap"><canvas id="btChart"></canvas></div>
+
+    <div class="bt-trades">
+      <div class="bt-trades-title">آخر ${(d.trades||[]).length} صفقة</div>
+      ${tradeRows || '<div style="color:var(--muted);font-size:13px">لا توجد صفقات</div>'}
+    </div>
+
+    <div class="bt-honest">
+      <b>⚠️ تنبيه مهم:</b> هذا اختبار افتراضي على بيانات تاريخية.
+      النتائج الماضية <b>لا تضمن</b> نفس العوائد مستقبلاً.
+      العوائد الحقيقية ستختلف بسبب: الفجوات السعرية، رسوم التداول، والأخبار المفاجئة.
+      استخدم هذا كأداة تعليمية فقط لفهم سلوك الاستراتيجية، وليس كضمان للربح.
+    </div>`;
+
+  buildBtChart(d.equity_curve || []);
+}
+
+function buildBtChart(equity) {
+  if (btChartInst) { btChartInst.destroy(); btChartInst = null; }
+  const ctx = document.getElementById('btChart');
+  if (!ctx || !equity.length) return;
+  const labels = equity.map(e => {
+    const d = new Date(e.time);
+    return `${d.getMonth()+1}/${d.getFullYear().toString().slice(2)}`;
+  });
+  const values = equity.map(e => e.value);
+  const maxV = Math.max(...values);
+  btChartInst = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label:'رأس المال', data: values,
+        borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,.1)',
+        fill: true, tension: .35, pointRadius: 0, borderWidth: 2 },
+      { label:'$10,000', data: equity.map(() => 10000),
+        borderColor:'#30363d', borderDash:[4,3], borderWidth:1,
+        pointRadius:0, fill:false }
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: { legend:{ display:false },
+        tooltip:{ backgroundColor:'#161b22', borderColor:'#30363d', borderWidth:1,
+          titleColor:'#7d8590', bodyColor:'#e6edf3',
+          callbacks:{ label: c => ` $${fmt(c.raw)}` } } },
+      scales: {
+        x: { grid:{ color:'#21262d' }, ticks:{ color:'#7d8590', maxTicksLimit:6, font:{size:10} } },
+        y: { grid:{ color:'#21262d' }, ticks:{ color:'#7d8590', font:{size:10}, callback: v => `$${fmt(v)}` } }
+      }
+    }
+  });
+}
+
+// ============================================================
 // Boot
 // ============================================================
-// Hide range tabs when not on analysis tab by default (analysis is default)
 document.getElementById('rangeTabs').style.display = 'flex';
 onSearch();
 </script>
