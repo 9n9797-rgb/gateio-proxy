@@ -834,6 +834,33 @@ function guideRec(rec) {
 // Render: Congress tab
 // ============================================================
 function renderCongress(d) {
+  if (d.source_unavailable) {
+    document.getElementById('congressContent').innerHTML = `
+      <div style="margin:16px;background:#1a1a2e;border:1px solid #30363d;border-radius:12px;padding:16px 18px">
+        <div style="font-size:22px;margin-bottom:8px">🏛️</div>
+        <div style="font-size:14px;font-weight:600;color:var(--yellow);margin-bottom:8px">مصادر بيانات الكونغرس غير متاحة مؤقتاً</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.7">
+          المصادر المجانية (house-stock-watcher + senate-stock-watcher) حجبت الوصول لملفاتها مؤخراً.<br><br>
+          <b style="color:var(--text)">الميزة لا تزال موجودة</b> في الكود وستعود للعمل حال توفر مصدر بيانات بديل.
+        </div>
+      </div>
+      <div class="guide-block" style="margin:0 16px">
+        <div class="guide-header" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.guide-toggle').textContent=this.nextElementSibling.classList.contains('open')?'▲':'▼'">
+          <div class="guide-header-left"><span class="guide-header-icon">🎓</span> كيف كانت تعمل ميزة الكونغرس؟</div>
+          <span class="guide-toggle">▼</span>
+        </div>
+        <div class="guide-body open">
+          <div class="guide-item">
+            <div class="guide-item-body">
+              النظام كان يسحب تلقائياً بيانات <b>STOCK Act</b> — القانون الذي يُلزم أعضاء الكونغرس بالإفصاح عن صفقاتهم خلال 45 يومًا.<br><br>
+              <b style="color:var(--green)">لماذا كانت مهمة؟</b> الكونغرس يطّلع على قوانين ومشاريع قبل إعلانها. عندما يشترون سهمًا بكثافة — كثيرًا ما تتبعه أخبار إيجابية.<br><br>
+              <b style="color:var(--yellow)">مثال حقيقي:</b> قبل إعلان قانون CHIPS Act، اشترى عدة أعضاء أسهم أشباه الموصلات — ومنها NVDA وTSM — قبل أسابيع من الإعلان.
+            </div>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
   if (!d.trades || d.trades.length === 0) {
     document.getElementById('congressContent').innerHTML = `
       <div class="cong-summary">

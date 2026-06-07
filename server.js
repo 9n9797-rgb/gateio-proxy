@@ -70,26 +70,32 @@ async function fetchNews(symbol) {
 }
 
 async function fetchCongressTrades(symbol, days = 90) {
-  const since = new Date(Date.now() - days * 86400000);
+  const since   = new Date(Date.now() - days * 86400000);
   const headers = { 'User-Agent': 'Mozilla/5.0 (compatible)' };
 
-  const [house, senate] = await Promise.all([
-    memoGet('house_all', async () => {
-      const r = await withTimeout(fetch(
-        'https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json',
-        { headers }), 25000);
-      const d = await r.json();
-      return Array.isArray(d) ? d : [];
-    }, 2 * 3600000),
+  const safeFetch = async (key, url) => {
+    return memoGet(key, async () => {
+      const r = await withTimeout(fetch(url, { headers }), 20000);
+      if (!r.ok) return { data: [], unavailable: true };
+      const text = await r.text();
+      if (text.trim().startsWith('<')) return { data: [], unavailable: true }; // XML error response
+      try {
+        const d = JSON.parse(text);
+        return { data: Array.isArray(d) ? d : [], unavailable: false };
+      } catch (_) {
+        return { data: [], unavailable: true };
+      }
+    }, 2 * 3600000);
+  };
 
-    memoGet('senate_all', async () => {
-      const r = await withTimeout(fetch(
-        'https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json',
-        { headers }), 25000);
-      const d = await r.json();
-      return Array.isArray(d) ? d : [];
-    }, 2 * 3600000)
+  const [houseRes, senateRes] = await Promise.all([
+    safeFetch('house_all',  'https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json'),
+    safeFetch('senate_all', 'https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json')
   ]);
+
+  const sourceUnavailable = houseRes.unavailable && senateRes.unavailable;
+  const house  = houseRes.data;
+  const senate = senateRes.data;
 
   const mapHouse = t => ({
     trader:  t.representative || 'Unknown',
@@ -116,9 +122,10 @@ async function fetchCongressTrades(symbol, days = 90) {
 
   return {
     trades: all,
-    buys:  all.filter(t => t.type === 'purchase').length,
-    sells: all.filter(t => t.type === 'sale').length,
-    total: all.length
+    buys:   all.filter(t => t.type === 'purchase').length,
+    sells:  all.filter(t => t.type === 'sale').length,
+    total:  all.length,
+    source_unavailable: sourceUnavailable
   };
 }
 
