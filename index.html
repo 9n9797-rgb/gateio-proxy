@@ -49,8 +49,8 @@
   /* Bottom nav */
   .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:30}
   .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 4px 8px;cursor:pointer;gap:3px;transition:.15s}
-  .nav-item .nav-icon{font-size:20px}
-  .nav-item .nav-label{font-size:10px;color:var(--muted);font-weight:500}
+  .nav-item .nav-icon{font-size:18px}
+  .nav-item .nav-label{font-size:9px;color:var(--muted);font-weight:500}
   .nav-item.active .nav-label{color:var(--blue)}
   .nav-item.active .nav-icon{filter:drop-shadow(0 0 4px var(--blue))}
 
@@ -202,6 +202,33 @@
   .cong-amount{font-size:11px;color:var(--muted);direction:ltr}
   .cong-date{font-size:10px;color:var(--muted);margin-top:2px;direction:ltr}
 
+  /* === Scan tab === */
+  .scan-header{padding:10px 16px 6px;display:flex;justify-content:space-between;align-items:center}
+  .scan-meta{font-size:11px;color:var(--muted)}
+  .scan-refresh{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 14px;font-size:12px;cursor:pointer;color:var(--blue);font-weight:600}
+  .scan-card{background:var(--card);border:1px solid var(--border);border-radius:12px;margin:8px 16px;overflow:hidden}
+  .scan-card-header{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border);gap:8px}
+  .scan-sym{font-size:20px;font-weight:700;direction:ltr;letter-spacing:.5px}
+  .scan-price{font-size:13px;color:var(--muted);direction:ltr}
+  .scan-grade-box{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;flex-shrink:0}
+  .scan-body{padding:11px 14px}
+  .scan-upside{font-size:28px;font-weight:800;direction:ltr;line-height:1}
+  .scan-upside-sub{font-size:11px;color:var(--muted);margin-bottom:10px}
+  .scan-scores{display:flex;gap:6px;margin-bottom:10px}
+  .scan-score-box{flex:1;background:var(--card2);border-radius:8px;padding:7px;text-align:center}
+  .scan-score-num{font-size:16px;font-weight:700}
+  .scan-score-lbl{font-size:10px;color:var(--muted);margin-top:1px}
+  .scan-reasons{margin-bottom:10px}
+  .scan-reason{font-size:12px;color:var(--text);padding:2px 0;display:flex;gap:6px}
+  .scan-reason::before{content:'•';color:var(--blue);flex-shrink:0}
+  .scan-targets{display:flex;gap:6px;margin-bottom:10px}
+  .scan-tbox{flex:1;background:var(--card2);border-radius:8px;padding:7px;text-align:center}
+  .scan-tval{font-size:13px;font-weight:600;direction:ltr}
+  .scan-tlbl{font-size:9px;color:var(--muted);margin-top:2px}
+  .scan-signal{font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px;display:inline-block;margin-bottom:8px}
+  .scan-open{width:100%;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--blue);padding:8px;font-size:13px;cursor:pointer;transition:.15s}
+  .scan-open:hover{background:var(--blue);color:#000;border-color:var(--blue)}
+
   /* === News tab === */
   .news-list{padding:10px 16px}
   .news-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 13px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;text-decoration:none;color:inherit;cursor:pointer}
@@ -281,6 +308,10 @@
   <div id="aiContent" class="state"><div>اضغط تحليل لتشغيل التحليل الذكي</div></div>
 </div>
 
+<div id="tabScan" class="tab-panel">
+  <div id="scanContent" class="state"><div>اضغط "فحص السوق" لإيجاد أفضل الفرص</div></div>
+</div>
+
 <!-- Bottom navigation -->
 <nav class="bottom-nav">
   <div class="nav-item active" id="navAnalysis" onclick="switchTab('analysis')">
@@ -301,6 +332,9 @@
   <div class="nav-item" id="navAi" onclick="switchTab('ai')">
     <span class="nav-icon">🤖</span><span class="nav-label">ذكاء</span>
   </div>
+  <div class="nav-item" id="navScan" onclick="switchTab('scan')">
+    <span class="nav-icon">🔍</span><span class="nav-label">فرص</span>
+  </div>
 </nav>
 
 <script>
@@ -314,9 +348,9 @@ let currentType = 'stock'; // 'stock' | 'crypto'
 let currentSym = 'AAPL';
 let activeTab = 'analysis';
 
-// Cache loaded data per-tab
-let tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null };
-let tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false };
+// Cache loaded data per-tab (scan is symbol-independent — never auto-reset)
+let tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null, scan: null };
+let tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false, scan: false };
 let btRange = '2y';
 let btChartInst = null;
 
@@ -342,9 +376,9 @@ function setType(type) {
   currentSym = chips[0];
   document.getElementById('symInput').value = currentSym;
   // Show/hide range tabs (crypto uses Gate.io directly, range irrelevant but keep for UX)
-  // Reset all tabs
-  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false };
-  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null };
+  // Reset symbol-dependent tabs only (preserve scan cache)
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false, scan: tabLoaded.scan };
+  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null, scan: tabData.scan };
   onSearch();
 }
 
@@ -356,9 +390,9 @@ function quickSym(el, sym) {
   el.classList.add('active');
   currentSym = sym;
   document.getElementById('symInput').value = sym;
-  // Reset tab cache
-  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false };
-  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null };
+  // Reset tab cache (preserve scan)
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false, scan: tabLoaded.scan };
+  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null, scan: tabData.scan };
   onSearch();
 }
 
@@ -381,8 +415,8 @@ function onSearch() {
   const sym = document.getElementById('symInput').value.trim().toUpperCase();
   if (!sym) return;
   if (sym !== currentSym) {
-    tabLoaded = { analysis: false, recommend: false, congress: false, news: false, ai: false };
-    tabData = { analysis: null, recommend: null, congress: null, news: null, ai: null };
+    tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false, scan: tabLoaded.scan };
+    tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null, scan: tabData.scan };
   }
   currentSym = sym;
   document.getElementById('headerSym').textContent = sym;
@@ -398,16 +432,17 @@ function onSearch() {
 // ============================================================
 function switchTab(tab) {
   activeTab = tab;
-  ['analysis','recommend','congress','news','backtest','ai'].forEach(t => {
+  ['analysis','recommend','congress','news','backtest','ai','scan'].forEach(t => {
     const panel = document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}`);
     if (panel) panel.classList.toggle('active', t === tab);
     const nav = document.getElementById(`nav${t.charAt(0).toUpperCase()+t.slice(1)}`);
     if (nav) nav.classList.toggle('active', t === tab);
   });
   document.getElementById('rangeTabs').style.display = tab === 'analysis' ? 'flex' : 'none';
-  if (!tabLoaded[tab] && currentSym) {
-    if (tab === 'backtest') renderBacktestShell();
-    else loadTab(tab);
+  if (!tabLoaded[tab]) {
+    if (tab === 'backtest')  renderBacktestShell();
+    else if (tab === 'scan') runScan();
+    else if (currentSym)     loadTab(tab);
   }
 }
 
@@ -1403,6 +1438,138 @@ function buildAIChart(d) {
       }
     }
   });
+}
+
+// ============================================================
+// Scan tab
+// ============================================================
+async function runScan(force = false) {
+  if (tabLoaded.scan && !force) return;
+  const el = document.getElementById('scanContent');
+  el.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري فحص 25 سهم أمريكي…<br><span style="font-size:12px;color:var(--muted)">يستغرق 10-15 ثانية في أول مرة</span></div></div>';
+  try {
+    const r = await fetch('/proxy/scan?top=5');
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    tabData.scan = d;
+    tabLoaded.scan = true;
+    renderScan(d);
+  } catch(e) {
+    el.innerHTML = `<div class="state">خطأ: ${e.message}</div>`;
+  }
+}
+
+function renderScan(d) {
+  const el = document.getElementById('scanContent');
+  if (!d || !d.top || d.top.length === 0) {
+    el.innerHTML = '<div class="state">لم يتم إيجاد فرص قوية حالياً</div>';
+    return;
+  }
+  const ago = d.ts ? Math.round((Date.now() - d.ts) / 60000) : 0;
+  const agoStr = ago < 1 ? 'الآن' : `منذ ${ago} دقيقة`;
+
+  const cards = d.top.map((s, idx) => {
+    const uColor = s.upside_pct >= 40 ? 'var(--green)' : s.upside_pct >= 20 ? 'var(--blue)' : 'var(--yellow)';
+    const gradeStyle = `background:${s.grade_color}22;color:${s.grade_color}`;
+    const sigStyle   = `background:${s.entry_signal?.color ?? '#888'}22;color:${s.entry_signal?.color ?? '#888'}`;
+    const bsWidth    = Math.min(100, s.breakout_score);
+    const bsColor    = s.breakout_score >= 70 ? 'var(--green)' : s.breakout_score >= 45 ? 'var(--yellow)' : 'var(--red)';
+    const reasHtml   = (s.reasons || []).map(r => `<div class="scan-reason">${r}</div>`).join('');
+    const entryLbl   = s.entry_signal?.label ?? '—';
+    const stop   = s.atr_stop   ? `$${fmt(s.atr_stop)}`   : '—';
+    const target = s.atr_target ? `$${fmt(s.atr_target)}` : '—';
+    const rr     = s.atr_rr    ? s.atr_rr                : '—';
+    const medal  = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx+1}`;
+    return `
+<div class="scan-card">
+  <div class="scan-card-header">
+    <div>
+      <div class="scan-sym">${medal} ${s.symbol}</div>
+      <div class="scan-price">$${fmt(s.price)}</div>
+    </div>
+    <div style="flex:1"></div>
+    <div>
+      <div style="text-align:center">
+        <div class="scan-grade-box" style="${gradeStyle}">${s.grade}</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px">AI ${s.ai_score}</div>
+      </div>
+    </div>
+  </div>
+  <div class="scan-body">
+    <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:2px">
+      <div class="scan-upside" style="color:${uColor}">+${s.upside_pct}%</div>
+      <div style="font-size:11px;color:var(--muted);padding-bottom:4px">هدف مقدر</div>
+    </div>
+    <div class="scan-upside-sub">الهدف: $${fmt(s.period_high)} (أعلى 6 أشهر)</div>
+
+    <div class="scan-scores">
+      <div class="scan-score-box">
+        <div class="scan-score-num" style="color:${bsColor}">${s.breakout_score}</div>
+        <div class="scan-score-lbl">Breakout</div>
+      </div>
+      <div class="scan-score-box">
+        <div class="scan-score-num">${s.ai_score}</div>
+        <div class="scan-score-lbl">AI Score</div>
+      </div>
+      <div class="scan-score-box">
+        <div class="scan-score-num" style="color:${s.rsi<35?'var(--blue)':s.rsi>65?'var(--red)':'var(--green)'}">${s.rsi?.toFixed(1)}</div>
+        <div class="scan-score-lbl">RSI</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
+        <span>Breakout Score</span><span>${s.breakout_score}/100</span>
+      </div>
+      <div style="background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+        <div style="width:${bsWidth}%;height:100%;background:${bsColor};border-radius:4px;transition:.4s"></div>
+      </div>
+    </div>
+
+    <div class="scan-reasons">${reasHtml}</div>
+
+    <div class="scan-targets">
+      <div class="scan-tbox">
+        <div class="scan-tval" style="color:var(--green)">${target}</div>
+        <div class="scan-tlbl">هدف ATR</div>
+      </div>
+      <div class="scan-tbox">
+        <div class="scan-tval" style="color:var(--red)">${stop}</div>
+        <div class="scan-tlbl">وقف الخسارة</div>
+      </div>
+      <div class="scan-tbox">
+        <div class="scan-tval">${rr}</div>
+        <div class="scan-tlbl">نسبة R:R</div>
+      </div>
+    </div>
+
+    <div class="scan-signal" style="${sigStyle}">${entryLbl}</div>
+
+    <button class="scan-open" onclick="openFromScan('${s.symbol}')">فتح التحليل الكامل →</button>
+  </div>
+</div>`;
+  }).join('');
+
+  el.innerHTML = `
+<div class="scan-header">
+  <div>
+    <div style="font-size:14px;font-weight:600">أفضل ${d.top.length} فرص من ${d.found}/${d.scanned} سهم</div>
+    <div class="scan-meta">آخر تحديث: ${agoStr}</div>
+  </div>
+  <button class="scan-refresh" onclick="tabLoaded.scan=false;runScan(true)">🔄 تحديث</button>
+</div>
+${cards}`;
+}
+
+function openFromScan(sym) {
+  currentSym = sym;
+  document.getElementById('symInput').value = sym;
+  currentType = 'stock';
+  document.getElementById('btnStocks').classList.add('active');
+  document.getElementById('btnCrypto').classList.remove('active');
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false, scan: tabLoaded.scan };
+  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null, scan: tabData.scan };
+  switchTab('ai');
 }
 
 // ============================================================

@@ -744,6 +744,141 @@ function buildAIScore(closes, highs, lows, opens, volumes, congress, news) {
   };
 }
 
+// ===== Breakout Score (50%+ upside scanner) =====
+function calcBreakoutScore(ai) {
+  let score = 0;
+  const reasons = [];
+
+  const rsi     = ai.rsi ?? 50;
+  const bbPct   = ai.bollinger?.position_pct;
+  const stochK  = ai.stoch_rsi?.k ?? 50;
+  const stochD  = ai.stoch_rsi?.d ?? 50;
+  const patterns = ai.patterns || [];
+  const ma      = ai.ma || {};
+  const roc20   = ai.roc20 ?? 0;
+  const volSpikes = ai.volume_spikes || [];
+  const obvScore  = ai.score_components?.obv ?? 0;  // 0 | 6 | 18
+
+  // RSI sweet spot 35-52 (coiled before breakout)
+  if      (rsi >= 35 && rsi <= 52) { score += 25; reasons.push(`RSI ${rsi.toFixed(1)} — منطقة تجميع مثالية`); }
+  else if (rsi > 25  && rsi < 35)  { score += 15; reasons.push(`RSI ${rsi.toFixed(1)} — تشبع بيعي، ارتداد محتمل`); }
+  else if (rsi > 52  && rsi <= 62) { score += 12; reasons.push(`RSI ${rsi.toFixed(1)} — زخم إيجابي معتدل`); }
+
+  // MACD bullish
+  if (ai.macd?.bullish) { score += 20; reasons.push('MACD تقاطع إيجابي صاعد'); }
+  else                    score -= 5;
+
+  // OBV trend (inferred from score_component)
+  if      (obvScore >= 15) { score += 22; reasons.push('OBV صاعد — تدفق مؤسسي للشراء'); }
+  else if (obvScore >= 5)  { score += 10; reasons.push('OBV محايد مع ميل للصعود'); }
+
+  // Bollinger near lower band → coiled spring
+  if      (bbPct != null && bbPct <= 20) { score += 18; reasons.push(`سعر عند ${bbPct}% من نطاق BB — ضغط قوي عند الدعم`); }
+  else if (bbPct != null && bbPct <= 35) { score += 10; reasons.push(`سعر عند ${bbPct}% من BB — قريب من الدعم`); }
+
+  // Bullish volume spike (institutional accumulation)
+  const bullSpike = volSpikes.find(v => v.bullish && v.daysAgo <= 5);
+  if (bullSpike) { score += 12; reasons.push(`ارتفاع حجم ×${bullSpike.ratio} على الشراء منذ ${bullSpike.daysAgo} أيام`); }
+
+  // StochRSI oversold turning up
+  if (stochK < 25 && stochK > stochD) { score += 10; reasons.push(`Stoch RSI ${stochK.toFixed(1)} — انعكاس من التشبع البيعي`); }
+
+  // Bullish candle pattern
+  const bullPats = patterns.filter(p => p.bullish === true);
+  if (bullPats.length > 0) { score += 8; reasons.push(`نمط ${bullPats[0].name} — شمعة انعكاس إيجابي`); }
+
+  // MA alignment
+  if      (ma.above_20 && ma.bullish_cross) { score += 5; reasons.push('MA20 فوق MA50 وسعر فوق المتوسطات'); }
+  else if (ma.above_50 && !ma.above_20)     { score += 3; reasons.push('سعر فوق MA50 — دعم طويل المدى'); }
+
+  // Positive ROC building momentum
+  if      (roc20 > 0 && roc20 < 20)  { score += 5; reasons.push(`زخم ROC20 +${roc20.toFixed(1)}% — بداية صعود`); }
+  else if (roc20 >= 20)               { score -= 5; } // already ran, less upside
+
+  // Penalty: overbought
+  if (rsi > 75) score -= 10;
+
+  return {
+    breakout_score: Math.max(0, Math.min(100, Math.round(score))),
+    reasons: reasons.slice(0, 5)
+  };
+}
+
+// 25 US stocks to scan
+const SCAN_UNIVERSE = [
+  'NVDA','AAPL','MSFT','META','GOOGL','AMZN','TSLA','AMD','TSM','NFLX',
+  'PLTR','CRWD','NET','SMCI','ARM','PYPL','INTC','SOFI','RKLB','DIS',
+  'UBER','SQ','HOOD','COIN','MSTR'
+];
+
+// ===== مسح السوق — أفضل فرص الصعود =====
+app.get('/proxy/scan', async (req, res) => {
+  const top = Math.min(parseInt(req.query.top) || 5, 10);
+  const cacheKey = 'market_scan';
+
+  return memoGet(cacheKey, async () => {
+    const scanOne = async sym => {
+      try {
+        const url  = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=6mo`;
+        const r    = await withTimeout(fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }), 12000);
+        const json = await r.json();
+        const result = json?.chart?.result?.[0];
+        if (!result) return null;
+        const q     = result.indicators?.quote?.[0] || {};
+        const times = result.timestamp || [];
+        let closes  = (q.close  || []).map(v => v ?? 0);
+        let highs   = (q.high   || []).map(v => v ?? 0);
+        let lows    = (q.low    || []).map(v => v ?? 0);
+        let opens   = (q.open   || []).map(v => v ?? 0);
+        let volumes = (q.volume || []).map(v => v ?? 0);
+        const valid = times.reduce((acc, t, i) => {
+          if (closes[i] > 0) acc.push({ t, o: opens[i], h: highs[i], l: lows[i], c: closes[i], v: volumes[i] });
+          return acc;
+        }, []);
+        if (valid.length < 30) return null;
+        opens   = valid.map(x => x.o); highs   = valid.map(x => x.h);
+        lows    = valid.map(x => x.l); closes  = valid.map(x => x.c);
+        volumes = valid.map(x => x.v);
+        const ai = buildAIScore(closes, highs, lows, opens, volumes, { trades:[], buys:0, sells:0, total:0 }, []);
+        if (!ai) return null;
+        const { breakout_score, reasons } = calcBreakoutScore(ai);
+        const currentPrice = closes[closes.length - 1];
+        const periodHigh   = ai.support_resistance?.period_high || currentPrice;
+        // Upside: distance to 6-month high OR 3×ATR target
+        let upsidePct = 0;
+        if (periodHigh > currentPrice * 1.02) {
+          upsidePct = Math.round((periodHigh - currentPrice) / currentPrice * 100);
+        } else if (ai.atr_target && ai.atr_target > currentPrice) {
+          upsidePct = Math.round((ai.atr_target - currentPrice) / currentPrice * 100);
+        }
+        // rank: breakout 60% + AI 40%, penalise overbought RSI
+        const rank = (breakout_score * 0.6 + ai.ai_score * 0.4) * (ai.rsi > 72 ? 0.65 : 1);
+        return {
+          symbol: sym,
+          price:  Math.round(currentPrice * 100) / 100,
+          ai_score: ai.ai_score, grade: ai.grade, grade_color: ai.grade_color,
+          breakout_score, reasons,
+          entry_signal: ai.entry_signal,
+          rsi: ai.rsi, macd_bull: ai.macd?.bullish,
+          ma: ai.ma, regime: ai.regime,
+          atr_stop: ai.atr_stop, atr_target: ai.atr_target, atr_rr: ai.atr_rr,
+          upside_pct: upsidePct,
+          period_high: Math.round(periodHigh * 100) / 100,
+          rank
+        };
+      } catch(_) { return null; }
+    };
+
+    // scan all 25 in parallel (each has 12s timeout)
+    const settled = await Promise.allSettled(SCAN_UNIVERSE.map(scanOne));
+    const results = settled.map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean);
+    results.sort((a, b) => b.rank - a.rank);
+    return { scanned: SCAN_UNIVERSE.length, found: results.length, top: results.slice(0, top), ts: Date.now() };
+  }, 30 * 60000)  // cache 30 min
+  .then(d => res.json(d))
+  .catch(e => res.json(upstreamError(e)));
+});
+
 // ===== تحليل التجميع =====
 app.get("/proxy/analyze/:pair", async (req, res) => {
   const pair = req.params.pair.toUpperCase();
