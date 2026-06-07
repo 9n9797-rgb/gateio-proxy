@@ -3,105 +3,199 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Accumulation Detector — الأسهم الأمريكية</title>
+<title>محلل الأسهم والعملات</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root{
     --bg:#0d1117;--card:#161b22;--card2:#1c2128;--border:#30363d;
     --text:#e6edf3;--muted:#7d8590;--green:#3fb950;--red:#f85149;
     --yellow:#d29922;--blue:#58a6ff;
+    --c-strong-buy:#3fb950;--c-buy:#58c96a;--c-hold:#d29922;
+    --c-watch:#8b949e;--c-sell:#f0883e;--c-strong-sell:#f85149;
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;max-width:480px;margin:0 auto;padding:0 0 40px}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;max-width:480px;margin:0 auto;padding:0 0 70px}
 
-  .header{display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
-  .header h1{font-size:17px;font-weight:600}
-  .btn-icon{background:var(--card);border:1px solid var(--border);color:var(--text);width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px}
-  .btn-icon:hover{background:var(--card2)}
+  /* Header */
+  .header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:20}
+  .header h1{font-size:16px;font-weight:600}
 
-  .search-bar{display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border)}
-  .search-bar input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-size:15px;outline:none;direction:ltr;text-transform:uppercase}
+  /* Type toggle */
+  .type-toggle{display:flex;gap:0;padding:10px 16px;border-bottom:1px solid var(--border)}
+  .type-btn{flex:1;text-align:center;padding:7px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--muted);transition:.15s}
+  .type-btn:first-child{border-radius:8px 0 0 8px}
+  .type-btn:last-child{border-radius:0 8px 8px 0}
+  .type-btn.active{background:var(--blue);border-color:var(--blue);color:#000}
+
+  /* Search */
+  .search-bar{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+  .search-bar input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 14px;color:var(--text);font-size:15px;outline:none;direction:ltr;text-transform:uppercase}
   .search-bar input:focus{border-color:var(--blue)}
   .search-bar input::placeholder{color:var(--muted);text-transform:none}
-  .search-bar button{background:var(--blue);color:#000;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer}
-  .search-bar button:hover{opacity:.88}
+  .search-bar button{background:var(--blue);color:#000;border:none;border-radius:10px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer}
   .search-bar button:disabled{opacity:.5;cursor:not-allowed}
 
-  .chips{display:flex;gap:8px;padding:12px 16px;overflow-x:auto;scrollbar-width:none}
+  /* Chips */
+  .chips{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--border)}
   .chips::-webkit-scrollbar{display:none}
-  .chip{flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:13px;cursor:pointer;transition:.15s;direction:ltr}
+  .chip{flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:5px 13px;font-size:12px;cursor:pointer;transition:.15s;direction:ltr}
   .chip:hover,.chip.active{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
 
-  .range-tabs{display:flex;gap:6px;padding:0 16px 12px;border-bottom:1px solid var(--border)}
+  /* Range tabs */
+  .range-tabs{display:flex;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border)}
   .range-tab{flex:1;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px;font-size:12px;cursor:pointer;direction:ltr}
   .range-tab.active{background:var(--card2);border-color:var(--blue);color:var(--blue);font-weight:600}
 
-  .state{text-align:center;padding:60px 16px;color:var(--muted);font-size:15px}
+  /* Bottom nav */
+  .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:30}
+  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 4px 8px;cursor:pointer;gap:3px;transition:.15s}
+  .nav-item .nav-icon{font-size:20px}
+  .nav-item .nav-label{font-size:10px;color:var(--muted);font-weight:500}
+  .nav-item.active .nav-label{color:var(--blue)}
+  .nav-item.active .nav-icon{filter:drop-shadow(0 0 4px var(--blue))}
+
+  /* Tab panels */
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+
+  /* State / spinner */
+  .state{text-align:center;padding:50px 16px;color:var(--muted);font-size:15px}
   .spinner{display:inline-block;width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
   @keyframes spin{to{transform:rotate(360deg)}}
 
-  .price-block{padding:18px 16px 12px;border-bottom:1px solid var(--border)}
+  /* Price block */
+  .price-block{padding:16px 16px 12px;border-bottom:1px solid var(--border)}
   .company-name{font-size:12px;color:var(--muted);margin-bottom:4px}
-  .ticker-name{font-size:24px;font-weight:700;direction:ltr;letter-spacing:.5px}
+  .ticker-name{font-size:22px;font-weight:700;direction:ltr;letter-spacing:.5px}
   .price-row{display:flex;align-items:baseline;gap:10px;margin-top:6px}
-  .price-main{font-size:34px;font-weight:700;letter-spacing:-1px;direction:ltr}
-  .price-change{font-size:14px;font-weight:600;border-radius:6px;padding:3px 9px}
+  .price-main{font-size:30px;font-weight:700;letter-spacing:-1px;direction:ltr}
+  .price-change{font-size:13px;font-weight:600;border-radius:6px;padding:3px 9px}
   .price-change.up{color:var(--green);background:#0d2a14}
   .price-change.down{color:var(--red);background:#2a0d0d}
   .price-range{font-size:12px;color:var(--muted);margin-top:5px;direction:ltr}
 
-  .signal-banner{margin:14px 16px 0;border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;font-size:15px;font-weight:600}
+  /* Signal banner */
+  .signal-banner{margin:12px 16px 0;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:12px;font-size:14px;font-weight:600}
   .signal-banner.accumulation{background:#0d2a14;border:1px solid #238636}
   .signal-banner.neutral{background:#2a1f0a;border:1px solid #7a5400}
   .signal-banner.distribution{background:#2a0d0d;border:1px solid #8c1a1a}
-  .signal-icon{font-size:26px;flex-shrink:0}
-  .signal-text small{display:block;font-weight:400;font-size:12px;color:var(--muted);margin-top:2px}
+  .signal-icon{font-size:24px;flex-shrink:0}
+  .signal-text small{display:block;font-weight:400;font-size:11px;color:var(--muted);margin-top:2px}
 
-  .score-bar{display:flex;gap:4px;margin-top:10px;padding:0 16px}
+  /* Score bar */
+  .score-bar{display:flex;gap:4px;margin-top:8px;padding:0 16px}
   .score-dot{flex:1;height:4px;border-radius:2px;background:var(--border)}
   .score-dot.filled{background:var(--green)}
 
-  .cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:14px 16px}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center}
-  .card-label{font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:500}
-  .card-value{font-size:22px;font-weight:700}
+  /* Cards grid */
+  .cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:12px 16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center}
+  .card-label{font-size:10px;color:var(--muted);margin-bottom:5px;font-weight:500}
+  .card-value{font-size:20px;font-weight:700}
   .card-sub{font-size:10px;margin-top:3px;color:var(--muted);line-height:1.4}
-  .badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;border-radius:6px;padding:3px 8px;margin-top:4px}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;border-radius:6px;padding:3px 7px;margin-top:3px}
   .badge-green{color:var(--green);background:#0d2a14}
   .badge-red{color:var(--red);background:#2a0d0d}
   .badge-yellow{color:var(--yellow);background:#2a1a0a}
 
-  .chart-section{padding:10px 16px}
-  .chart-tabs{display:flex;gap:6px;margin-bottom:10px;justify-content:flex-end}
-  .chart-tab{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;direction:ltr}
+  /* Chart */
+  .chart-section{padding:8px 16px}
+  .chart-tabs{display:flex;gap:6px;margin-bottom:8px;justify-content:flex-end}
+  .chart-tab{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 11px;font-size:11px;cursor:pointer;direction:ltr}
   .chart-tab.active{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
-  .chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;height:220px}
+  .chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;height:200px}
 
-  .ind-section{padding:10px 16px}
-  .ind-title{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
-  .ind-row{display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px}
-  .ind-name{font-size:14px;font-weight:500}
-  .ind-desc{font-size:11px;color:var(--muted);margin-top:2px}
-  .bar-wrap{width:90px;height:5px;background:var(--border);border-radius:3px;margin-top:5px;overflow:hidden;direction:ltr}
+  /* Indicators */
+  .ind-section{padding:8px 16px}
+  .ind-title{font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+  .ind-row{display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:7px}
+  .ind-name{font-size:13px;font-weight:500}
+  .ind-desc{font-size:10px;color:var(--muted);margin-top:2px}
+  .bar-wrap{width:80px;height:4px;background:var(--border);border-radius:3px;margin-top:5px;overflow:hidden;direction:ltr}
   .bar-fill{height:100%;border-radius:3px;transition:.6s}
 
-  .disclaimer{margin:14px 16px 0;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:11px;color:var(--muted);line-height:1.6}
+  /* Disclaimer */
+  .disclaimer{margin:12px 16px 0;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:11px 13px;font-size:11px;color:var(--muted);line-height:1.6}
+
+  /* === Recommendation tab === */
+  .rec-badge{text-align:center;padding:20px 16px 14px}
+  .rec-pill{display:inline-block;font-size:22px;font-weight:700;border-radius:12px;padding:10px 28px;margin-bottom:8px}
+  .rec-date{font-size:11px;color:var(--muted)}
+  .conf-block{display:flex;align-items:center;gap:14px;padding:0 16px 14px;border-bottom:1px solid var(--border)}
+  .conf-ring-wrap{flex-shrink:0;position:relative;width:70px;height:70px}
+  .conf-ring-wrap svg{transform:rotate(-90deg)}
+  .conf-ring-wrap .ring-val{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700}
+  .conf-text{flex:1}
+  .conf-label{font-size:12px;color:var(--muted);margin-bottom:4px}
+  .conf-tip{font-size:13px;line-height:1.5}
+  .rec-targets{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+  .target-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+  .target-label{font-size:10px;color:var(--muted);margin-bottom:4px}
+  .target-value{font-size:17px;font-weight:700;direction:ltr}
+  .target-sub{font-size:10px;color:var(--muted);margin-top:2px}
+  .scores-section{padding:12px 16px;border-bottom:1px solid var(--border)}
+  .scores-title{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+  .score-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .score-row-label{font-size:13px;font-weight:500;width:60px;flex-shrink:0}
+  .score-track{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:visible;position:relative}
+  .score-center{position:absolute;top:-1px;left:50%;width:2px;height:10px;background:var(--border);border-radius:1px}
+  .score-fill{height:100%;border-radius:4px;transition:.6s;position:absolute;top:0}
+  .score-val{font-size:12px;font-weight:600;width:32px;text-align:left;flex-shrink:0;direction:ltr}
+  .score-sublabel{font-size:10px;color:var(--muted);width:60px;text-align:right;flex-shrink:0}
+  .risk-row{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+  .risk-chip{flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;text-align:center}
+  .risk-chip-label{font-size:10px;color:var(--muted);margin-bottom:4px}
+  .risk-chip-val{font-size:13px;font-weight:600}
+
+  /* === Congress tab === */
+  .cong-summary{display:flex;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .cong-stat{flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center}
+  .cong-stat-val{font-size:22px;font-weight:700}
+  .cong-stat-label{font-size:11px;color:var(--muted);margin-top:2px}
+  .cong-list{padding:10px 16px}
+  .cong-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start}
+  .cong-left .cong-trader{font-size:13px;font-weight:600}
+  .cong-left .cong-chamber{font-size:10px;color:var(--muted);margin-top:2px}
+  .cong-right{text-align:left;flex-shrink:0}
+  .cong-type{font-size:12px;font-weight:700;border-radius:6px;padding:3px 8px;margin-bottom:3px;direction:ltr}
+  .cong-type.purchase{color:var(--green);background:#0d2a14}
+  .cong-type.sale{color:var(--red);background:#2a0d0d}
+  .cong-amount{font-size:11px;color:var(--muted);direction:ltr}
+  .cong-date{font-size:10px;color:var(--muted);margin-top:2px;direction:ltr}
+
+  /* === News tab === */
+  .news-list{padding:10px 16px}
+  .news-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 13px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;text-decoration:none;color:inherit;cursor:pointer}
+  .news-sentiment{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:3px}
+  .sent-pos{background:var(--green)}
+  .sent-neg{background:var(--red)}
+  .sent-neu{background:var(--muted)}
+  .news-content{flex:1}
+  .news-title{font-size:13px;font-weight:500;line-height:1.4;margin-bottom:5px}
+  .news-meta{font-size:11px;color:var(--muted);direction:ltr}
 </style>
 </head>
 <body>
 
 <div class="header">
-  <span class="btn-icon" onclick="resetView()">✕</span>
-  <h1>accumulation-detector</h1>
-  <span class="btn-icon">⋯</span>
+  <h1 id="headerTitle">محلل الأسهم</h1>
+  <span style="font-size:11px;color:var(--muted)" id="headerSym"></span>
 </div>
 
+<!-- Type toggle -->
+<div class="type-toggle">
+  <div class="type-btn active" id="btnStocks" onclick="setType('stock')">أسهم</div>
+  <div class="type-btn" id="btnCrypto" onclick="setType('crypto')">عملات</div>
+</div>
+
+<!-- Search -->
 <div class="search-bar">
-  <input id="symInput" type="text" placeholder="مثال: AAPL أو TSLA" value="AAPL"
-    onkeydown="if(event.key==='Enter')analyze()">
-  <button id="analyzeBtn" onclick="analyze()">تحليل</button>
+  <input id="symInput" type="text" placeholder="مثال: AAPL أو BTC_USDT" value="AAPL"
+    onkeydown="if(event.key==='Enter')onSearch()">
+  <button id="searchBtn" onclick="onSearch()">تحليل</button>
 </div>
 
+<!-- Quick chips -->
 <div class="chips" id="quickChips">
   <span class="chip active" onclick="quickSym(this,'AAPL')">AAPL</span>
   <span class="chip" onclick="quickSym(this,'MSFT')">MSFT</span>
@@ -115,6 +209,7 @@
   <span class="chip" onclick="quickSym(this,'NFLX')">NFLX</span>
 </div>
 
+<!-- Range tabs (analysis only) -->
 <div class="range-tabs" id="rangeTabs">
   <span class="range-tab" onclick="setRange(this,'1mo')">1M</span>
   <span class="range-tab active" onclick="setRange(this,'3mo')">3M</span>
@@ -122,178 +217,509 @@
   <span class="range-tab" onclick="setRange(this,'1y')">1Y</span>
 </div>
 
-<div id="mainContent">
-  <div class="state"><div>اختر سهمًا لبدء التحليل</div></div>
+<!-- Tab panels -->
+<div id="tabAnalysis" class="tab-panel active">
+  <div id="analysisContent" class="state"><div>اختر رمزاً لبدء التحليل</div></div>
 </div>
 
+<div id="tabRecommend" class="tab-panel">
+  <div id="recommendContent" class="state"><div>اضغط تحليل لرؤية التوصية</div></div>
+</div>
+
+<div id="tabCongress" class="tab-panel">
+  <div id="congressContent" class="state"><div>اضغط تحليل لعرض تداولات الكونغرس</div></div>
+</div>
+
+<div id="tabNews" class="tab-panel">
+  <div id="newsContent" class="state"><div>اضغط تحليل لعرض الأخبار</div></div>
+</div>
+
+<!-- Bottom navigation -->
+<nav class="bottom-nav">
+  <div class="nav-item active" id="navAnalysis" onclick="switchTab('analysis')">
+    <span class="nav-icon">📊</span>
+    <span class="nav-label">تحليل</span>
+  </div>
+  <div class="nav-item" id="navRecommend" onclick="switchTab('recommend')">
+    <span class="nav-icon">🎯</span>
+    <span class="nav-label">توصية</span>
+  </div>
+  <div class="nav-item" id="navCongress" onclick="switchTab('congress')">
+    <span class="nav-icon">🏛️</span>
+    <span class="nav-label">كونغرس</span>
+  </div>
+  <div class="nav-item" id="navNews" onclick="switchTab('news')">
+    <span class="nav-icon">📰</span>
+    <span class="nav-label">أخبار</span>
+  </div>
+</nav>
+
 <script>
+// ============================================================
+// State
+// ============================================================
 let chartInst = null;
 let chartMode = 'price';
 let currentRange = '3mo';
-let lastData = null;
+let currentType = 'stock'; // 'stock' | 'crypto'
+let currentSym = 'AAPL';
+let activeTab = 'analysis';
 
+// Cache loaded data per-tab
+let tabData = { analysis: null, recommend: null, congress: null, news: null };
+let tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
+
+const STOCK_CHIPS = ['AAPL','MSFT','NVDA','META','GOOGL','AMZN','TSLA','AMD','TSM','NFLX'];
+const CRYPTO_CHIPS = ['BTC_USDT','ETH_USDT','SOL_USDT','BNB_USDT','XRP_USDT'];
+
+// ============================================================
+// Type switcher
+// ============================================================
+function setType(type) {
+  if (currentType === type) return;
+  currentType = type;
+  document.getElementById('btnStocks').classList.toggle('active', type === 'stock');
+  document.getElementById('btnCrypto').classList.toggle('active', type === 'crypto');
+  document.getElementById('headerTitle').textContent = type === 'crypto' ? 'محلل العملات' : 'محلل الأسهم';
+  // Rebuild chips
+  const chips = type === 'crypto' ? CRYPTO_CHIPS : STOCK_CHIPS;
+  const container = document.getElementById('quickChips');
+  container.innerHTML = chips.map((s, i) =>
+    `<span class="chip${i===0?' active':''}" onclick="quickSym(this,'${s}')">${s}</span>`
+  ).join('');
+  // Set default symbol
+  currentSym = chips[0];
+  document.getElementById('symInput').value = currentSym;
+  // Show/hide range tabs (crypto uses Gate.io directly, range irrelevant but keep for UX)
+  // Reset all tabs
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
+  tabData = { analysis: null, recommend: null, congress: null, news: null };
+  onSearch();
+}
+
+// ============================================================
+// Quick chip selection
+// ============================================================
 function quickSym(el, sym) {
   document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
+  currentSym = sym;
   document.getElementById('symInput').value = sym;
-  analyze();
+  // Reset tab cache
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
+  tabData = { analysis: null, recommend: null, congress: null, news: null };
+  onSearch();
 }
 
+// ============================================================
+// Range
+// ============================================================
 function setRange(el, range) {
   document.querySelectorAll('.range-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   currentRange = range;
-  const sym = document.getElementById('symInput').value.trim();
-  if (sym) analyze();
+  tabLoaded.analysis = false;
+  tabData.analysis = null;
+  loadTab('analysis');
 }
 
-function resetView() {
-  document.getElementById('symInput').value = '';
-  document.getElementById('mainContent').innerHTML =
-    '<div class="state"><div>اختر سهمًا لبدء التحليل</div></div>';
-  lastData = null;
-  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-}
-
-async function analyze() {
+// ============================================================
+// Search trigger
+// ============================================================
+function onSearch() {
   const sym = document.getElementById('symInput').value.trim().toUpperCase();
   if (!sym) return;
-  const btn = document.getElementById('analyzeBtn');
-  btn.disabled = true; btn.textContent = '...';
-  document.getElementById('mainContent').innerHTML =
-    '<div class="state"><div class="spinner"></div><div>جاري التحليل…</div></div>';
-  try {
-    const res = await fetch(`/proxy/stock/${sym}?range=${currentRange}&interval=1d`);
-    const d   = await res.json();
-    if (d.error) throw new Error(d.error);
-    lastData = d;
-    renderResult(d);
-  } catch(e) {
-    document.getElementById('mainContent').innerHTML =
-      `<div class="state">❌<br><br>${e.message}</div>`;
-  } finally {
-    btn.disabled = false; btn.textContent = 'تحليل';
+  if (sym !== currentSym) {
+    tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
+    tabData = { analysis: null, recommend: null, congress: null, news: null };
+  }
+  currentSym = sym;
+  document.getElementById('headerSym').textContent = sym;
+  // Update chip highlight
+  document.querySelectorAll('.chip').forEach(c => {
+    c.classList.toggle('active', c.textContent === sym);
+  });
+  loadTab(activeTab);
+}
+
+// ============================================================
+// Tab switching
+// ============================================================
+function switchTab(tab) {
+  activeTab = tab;
+  // Update panels
+  ['analysis','recommend','congress','news'].forEach(t => {
+    document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}`).classList.toggle('active', t === tab);
+    document.getElementById(`nav${t.charAt(0).toUpperCase()+t.slice(1)}`).classList.toggle('active', t === tab);
+  });
+  // Show range tabs only on analysis
+  document.getElementById('rangeTabs').style.display = tab === 'analysis' ? 'flex' : 'none';
+  // Auto-fetch if not loaded
+  if (!tabLoaded[tab] && currentSym) loadTab(tab);
+}
+
+// ============================================================
+// Load data for a tab
+// ============================================================
+async function loadTab(tab) {
+  if (!currentSym) return;
+  const sym = currentSym;
+
+  if (tab === 'analysis') {
+    const contentEl = document.getElementById('analysisContent');
+    contentEl.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري التحليل…</div></div>';
+    const btn = document.getElementById('searchBtn');
+    btn.disabled = true; btn.textContent = '...';
+    try {
+      let d;
+      if (currentType === 'crypto') {
+        const pair = sym.includes('_') ? sym : `${sym}_USDT`;
+        const r = await fetch(`/proxy/analyze/${pair}?interval=1d&limit=90`);
+        const raw = await r.json();
+        if (raw.error) throw new Error(raw.error);
+        // Shape to match stock format
+        d = {
+          symbol: pair, name: pair, exchange: 'Gate.io', currency: 'USDT',
+          price: raw.price, change1d: raw.change24h,
+          high: raw.high, low: raw.low,
+          rsi: raw.rsi, obv_trend: raw.obv_trend,
+          above_ma20: raw.above_ma20, ma20: raw.ma20,
+          signal: raw.signal, score: raw.score, candles: raw.candles
+        };
+      } else {
+        const r = await fetch(`/proxy/stock/${sym}?range=${currentRange}&interval=1d`);
+        d = await r.json();
+        if (d.error) throw new Error(d.error);
+      }
+      tabData.analysis = d;
+      tabLoaded.analysis = true;
+      renderAnalysis(d);
+    } catch(e) {
+      contentEl.innerHTML = `<div class="state">خطأ: ${e.message}</div>`;
+    } finally {
+      btn.disabled = false; btn.textContent = 'تحليل';
+    }
+
+  } else if (tab === 'recommend') {
+    const el = document.getElementById('recommendContent');
+    el.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري الحساب…</div></div>';
+    try {
+      const typeParam = currentType === 'crypto' ? 'crypto' : 'stock';
+      const r = await fetch(`/proxy/recommend/${sym}?type=${typeParam}&range=${currentRange}`);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      tabData.recommend = d;
+      tabLoaded.recommend = true;
+      renderRecommend(d);
+    } catch(e) {
+      el.innerHTML = `<div class="state">خطأ: ${e.message}</div>`;
+    }
+
+  } else if (tab === 'congress') {
+    const el = document.getElementById('congressContent');
+    if (currentType === 'crypto') {
+      el.innerHTML = '<div class="state">تداولات الكونغرس متاحة للأسهم الأمريكية فقط</div>';
+      return;
+    }
+    el.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>';
+    try {
+      const r = await fetch(`/proxy/congress/${sym}?days=90`);
+      const d = await r.json();
+      tabData.congress = d;
+      tabLoaded.congress = true;
+      renderCongress(d);
+    } catch(e) {
+      el.innerHTML = `<div class="state">خطأ: ${e.message}</div>`;
+    }
+
+  } else if (tab === 'news') {
+    const el = document.getElementById('newsContent');
+    el.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>';
+    try {
+      const r = await fetch(`/proxy/news/${sym}`);
+      const d = await r.json();
+      tabData.news = d;
+      tabLoaded.news = true;
+      renderNews(d);
+    } catch(e) {
+      el.innerHTML = `<div class="state">خطأ: ${e.message}</div>`;
+    }
   }
 }
 
-function renderResult(d) {
+// ============================================================
+// Render: Analysis tab
+// ============================================================
+function renderAnalysis(d) {
   const SI = {
-    accumulation: { icon:'✅', label:'التجميع نشط', desc:'المستثمرون الكبار يجمعون — ننصح بالدخول على مراحل (DCA)', cls:'accumulation' },
-    neutral:      { icon:'⚠️', label:'إشارة محايدة', desc:'لا يوجد اتجاه واضح — انتظر تأكيداً إضافياً', cls:'neutral' },
-    distribution: { icon:'❌', label:'توزيع جارٍ',  desc:'ضغط بيع ملحوظ — احذر من الدخول', cls:'distribution' }
+    accumulation: { icon:'✅', label:'التجميع نشط', desc:'إشارة دخول تدريجي — المستثمرون الكبار يجمعون', cls:'accumulation' },
+    neutral:      { icon:'⚠️', label:'إشارة محايدة', desc:'انتظر تأكيداً إضافياً قبل الدخول', cls:'neutral' },
+    distribution: { icon:'❌', label:'توزيع جارٍ',  desc:'ضغط بيع — احذر من الدخول الجديد', cls:'distribution' }
   };
   const s = SI[d.signal] || SI.neutral;
-  const changeClass = d.change1d >= 0 ? 'up' : 'down';
-  const changeSign  = d.change1d >= 0 ? '+' : '';
-
+  const changeClass = (d.change1d||0) >= 0 ? 'up' : 'down';
+  const changeSign  = (d.change1d||0) >= 0 ? '+' : '';
   const rsiColor = d.rsi < 35 ? 'badge-red' : d.rsi > 65 ? 'badge-yellow' : 'badge-green';
   const rsiLabel = d.rsi < 35 ? 'تشبع بيعي' : d.rsi > 65 ? 'تشبع شرائي' : 'نطاق مثالي';
   const obvColor = d.obv_trend==='rising' ? 'badge-green' : d.obv_trend==='falling' ? 'badge-red' : 'badge-yellow';
   const obvLabel = d.obv_trend==='rising' ? '↑ صاعد' : d.obv_trend==='falling' ? '↓ هابط' : '→ محايد';
   const maColor  = d.above_ma20 ? 'badge-green' : 'badge-red';
+  const dots = [1,2,3].map(i => `<div class="score-dot ${i <= d.score ? 'filled' : ''}"></div>`).join('');
+  const prefix = currentType === 'crypto' ? '' : '$';
 
-  const dots = [1,2,3].map(i =>
-    `<div class="score-dot ${i <= d.score ? 'filled' : ''}"></div>`).join('');
-
-  document.getElementById('mainContent').innerHTML = `
+  document.getElementById('analysisContent').innerHTML = `
     <div class="price-block">
-      <div class="company-name">${d.name}${d.exchange ? ' · '+d.exchange : ''}</div>
+      <div class="company-name">${d.name||d.symbol}${d.exchange ? ' · '+d.exchange : ''}</div>
       <div class="ticker-name">${d.symbol}</div>
       <div class="price-row">
-        <span class="price-main">$${fmt(d.price)}</span>
-        <span class="price-change ${changeClass}">${changeSign}${d.change1d}%</span>
+        <span class="price-main">${prefix}${fmt(d.price)}</span>
+        <span class="price-change ${changeClass}">${changeSign}${(d.change1d||0).toFixed(2)}%</span>
       </div>
-      <div class="price-range">أعلى خلال الفترة: $${fmt(d.high)} &nbsp;|&nbsp; أدنى: $${fmt(d.low)}</div>
+      <div class="price-range">أعلى: ${prefix}${fmt(d.high)} | أدنى: ${prefix}${fmt(d.low)}</div>
     </div>
-
     <div class="signal-banner ${s.cls}">
       <span class="signal-icon">${s.icon}</span>
-      <div class="signal-text">
-        <div>${s.label}</div>
-        <small>${s.desc}</small>
-      </div>
+      <div class="signal-text"><div>${s.label}</div><small>${s.desc}</small></div>
     </div>
     <div class="score-bar">${dots}</div>
-
     <div class="cards">
       <div class="card">
-        <div class="card-label">RSI — قوة السهم</div>
+        <div class="card-label">RSI (14)</div>
         <div class="card-value">${d.rsi}</div>
         <div class="badge ${rsiColor}">${rsiLabel}</div>
-        <div class="card-sub">ساعد ≥ 35-55<br>نطاق التجميع</div>
+        <div class="card-sub">نطاق التجميع<br>35–55</div>
       </div>
       <div class="card">
-        <div class="card-label">OBV — حجم التراكم</div>
-        <div class="badge ${obvColor}" style="font-size:15px;margin-top:10px">${obvLabel}</div>
-        <div class="card-sub" style="margin-top:8px">صاعد = المال<br>يدخل السهم</div>
+        <div class="card-label">OBV — الحجم</div>
+        <div class="badge ${obvColor}" style="font-size:14px;margin-top:8px">${obvLabel}</div>
+        <div class="card-sub" style="margin-top:6px">صاعد = تراكم<br>هابط = توزيع</div>
       </div>
       <div class="card">
-        <div class="card-label">السعر فوق MA20</div>
-        <div class="badge ${maColor}" style="font-size:15px;margin-top:10px">${d.above_ma20 ? '✓ فوق' : '✗ تحت'}</div>
-        <div class="card-sub" style="margin-top:8px">MA20<br>$${fmt(d.ma20)}</div>
+        <div class="card-label">MA20</div>
+        <div class="badge ${maColor}" style="font-size:14px;margin-top:8px">${d.above_ma20?'فوق':'تحت'}</div>
+        <div class="card-sub" style="margin-top:6px">${prefix}${fmt(d.ma20)}</div>
       </div>
     </div>
-
     <div class="chart-section">
       <div class="chart-tabs">
-        <span class="chart-tab" onclick="switchChart('volume',this)">الحجم 📊</span>
+        <span class="chart-tab" onclick="switchChart('volume',this)">الحجم</span>
         <span class="chart-tab" onclick="switchChart('rsi',this)">RSI</span>
-        <span class="chart-tab active" onclick="switchChart('price',this)">السعر ✏️</span>
+        <span class="chart-tab active" onclick="switchChart('price',this)">السعر</span>
       </div>
       <div class="chart-wrap"><canvas id="mainChart"></canvas></div>
     </div>
-
     <div class="ind-section">
       <div class="ind-title">تفاصيل المؤشرات</div>
-
       <div class="ind-row">
         <div>
           <div class="ind-name">RSI (14 يوم)</div>
-          <div class="ind-desc">النطاق المثالي للتجميع: 35 – 55</div>
-          <div class="bar-wrap">
-            <div class="bar-fill" style="width:${d.rsi}%;background:${d.rsi>65?'#d29922':d.rsi<35?'#f85149':'#3fb950'}"></div>
-          </div>
+          <div class="ind-desc">النطاق المثالي: 35–55</div>
+          <div class="bar-wrap"><div class="bar-fill" style="width:${d.rsi}%;background:${d.rsi>65?'#d29922':d.rsi<35?'#f85149':'#3fb950'}"></div></div>
         </div>
         <div><div class="badge ${rsiColor}">${d.rsi}</div></div>
       </div>
-
       <div class="ind-row">
-        <div>
-          <div class="ind-name">On-Balance Volume</div>
-          <div class="ind-desc">مقارنة حجم آخر 5 جلسات بالسابقة</div>
-        </div>
+        <div><div class="ind-name">On-Balance Volume</div><div class="ind-desc">5 جلسات أخيرة vs. سابقتها</div></div>
         <div><div class="badge ${obvColor}">${obvLabel}</div></div>
       </div>
-
       <div class="ind-row">
-        <div>
-          <div class="ind-name">المتوسط المتحرك 20 يوم</div>
-          <div class="ind-desc">السعر الحالي ${d.above_ma20?'فوق':'تحت'} MA20</div>
-        </div>
+        <div><div class="ind-name">المتوسط المتحرك 20</div><div class="ind-desc">السعر ${d.above_ma20?'فوق':'تحت'} MA20</div></div>
         <div>
           <div class="badge ${maColor}">${d.above_ma20?'✓ فوق':'✗ تحت'}</div>
-          <div style="font-size:10px;color:var(--muted);text-align:left;margin-top:3px;direction:ltr">$${fmt(d.ma20)}</div>
+          <div style="font-size:10px;color:var(--muted);text-align:left;margin-top:2px;direction:ltr">${prefix}${fmt(d.ma20)}</div>
         </div>
       </div>
     </div>
-
-    <div class="disclaimer">
-      ⚠️ هذه الأداة تعليمية فقط — البيانات من Yahoo Finance • قرار الاستثمار مسؤوليتك الشخصية — استشر متخصصًا ماليًا قبل أي قرار
-    </div>`;
-
+    <div class="disclaimer">⚠️ هذه الأداة تعليمية — قرار الاستثمار مسؤوليتك الشخصية</div>
+  `;
   buildChart(d, 'price');
 }
 
+// ============================================================
+// Render: Recommendation tab
+// ============================================================
+const REC_COLORS = {
+  STRONG_BUY:'#3fb950', BUY:'#58c96a', HOLD:'#d29922',
+  WATCH:'#8b949e', SELL:'#f0883e', STRONG_SELL:'#f85149'
+};
+const REC_BG = {
+  STRONG_BUY:'#0d2a14', BUY:'#0d2a14', HOLD:'#2a1a0a',
+  WATCH:'#1c2128', SELL:'#2a1a0a', STRONG_SELL:'#2a0d0d'
+};
+
+function renderRecommend(d) {
+  const color  = REC_COLORS[d.recommendation] || '#8b949e';
+  const bg     = REC_BG[d.recommendation] || '#1c2128';
+  const conf   = d.confidence || 50;
+  const r = 28, circ = 2 * Math.PI * r;
+  const offset = circ * (1 - conf / 100);
+  const prefix = currentType === 'crypto' ? '' : '$';
+
+  const scoreBar = (val, maxVal) => {
+    // val is -4 to +4, center at 50%
+    const pct = ((val / maxVal) + 1) / 2 * 100;
+    const side = val >= 0 ? 'left' : 'right';
+    const barColor = val > 0.5 ? '#3fb950' : val < -0.5 ? '#f85149' : '#d29922';
+    const barWidth = Math.abs(val) / maxVal * 50;
+    const barLeft = val >= 0 ? '50%' : `${50 - barWidth}%`;
+    return `<div class="score-track">
+      <div class="score-center"></div>
+      <div class="score-fill" style="width:${barWidth}%;left:${barLeft};background:${barColor}"></div>
+    </div>`;
+  };
+
+  const ts = d.scores?.technical || {};
+  const cs = d.scores?.congress  || {};
+  const ns = d.scores?.news      || {};
+
+  const targetHtml = d.target_price ? `
+    <div class="target-card">
+      <div class="target-label">الهدف السعري</div>
+      <div class="target-value" style="color:var(--green)">${prefix}${fmt(d.target_price)}</div>
+      <div class="target-sub">+${d.upside_pct}% ربح متوقع</div>
+    </div>
+    <div class="target-card">
+      <div class="target-label">وقف الخسارة</div>
+      <div class="target-value" style="color:var(--red)">${prefix}${fmt(d.stop_loss)}</div>
+      <div class="target-sub">نسبة المكافأة/المخاطرة: ${d.rr_ratio||'—'}</div>
+    </div>` : `
+    <div class="target-card" style="grid-column:span 2">
+      <div class="target-label">الهدف السعري</div>
+      <div class="target-value" style="color:var(--muted)">لا توصية بالدخول</div>
+    </div>`;
+
+  document.getElementById('recommendContent').innerHTML = `
+    <div class="rec-badge">
+      <div class="rec-pill" style="color:${color};background:${bg}">${d.recommendation_ar||d.recommendation}</div>
+      <div class="rec-date">${d.date||''} · نقاط الثقة</div>
+    </div>
+    <div class="conf-block">
+      <div class="conf-ring-wrap">
+        <svg width="70" height="70" viewBox="0 0 70 70">
+          <circle cx="35" cy="35" r="${r}" fill="none" stroke="var(--border)" stroke-width="7"/>
+          <circle cx="35" cy="35" r="${r}" fill="none" stroke="${color}" stroke-width="7"
+            stroke-dasharray="${circ}" stroke-dashoffset="${offset}" stroke-linecap="round"/>
+        </svg>
+        <div class="ring-val" style="color:${color}">${conf}%</div>
+      </div>
+      <div class="conf-text">
+        <div class="conf-label">إجمالي الدرجات: ${d.total_score}</div>
+        <div class="conf-tip">${d.daily_tip||''}</div>
+      </div>
+    </div>
+    <div class="rec-targets">${targetHtml}</div>
+    <div class="scores-section">
+      <div class="scores-title">تفاصيل الدرجات</div>
+      <div class="score-row">
+        <div class="score-row-label">تقني</div>
+        ${scoreBar(ts.value||0, 4)}
+        <div class="score-val" style="color:${(ts.value||0)>0.5?'var(--green)':(ts.value||0)<-0.5?'var(--red)':'var(--muted)'}">${ts.value||0}</div>
+        <div class="score-sublabel" style="font-size:10px;color:var(--muted);text-align:right">${ts.label||''}</div>
+      </div>
+      <div class="score-row">
+        <div class="score-row-label">كونغرس</div>
+        ${scoreBar(cs.value||0, 3)}
+        <div class="score-val" style="color:${(cs.value||0)>0.5?'var(--green)':(cs.value||0)<-0.5?'var(--red)':'var(--muted)'}">${cs.value||0}</div>
+        <div class="score-sublabel" style="font-size:10px;color:var(--muted);text-align:right">${cs.label||''}</div>
+      </div>
+      <div class="score-row">
+        <div class="score-row-label">أخبار</div>
+        ${scoreBar(ns.value||0, 3)}
+        <div class="score-val" style="color:${(ns.value||0)>0.5?'var(--green)':(ns.value||0)<-0.5?'var(--red)':'var(--muted)'}">${ns.value||0}</div>
+        <div class="score-sublabel" style="font-size:10px;color:var(--muted);text-align:right">${ns.label||''}</div>
+      </div>
+    </div>
+    <div class="risk-row">
+      <div class="risk-chip">
+        <div class="risk-chip-label">الإطار الزمني</div>
+        <div class="risk-chip-val">${d.time_frame||'—'}</div>
+      </div>
+      <div class="risk-chip">
+        <div class="risk-chip-label">مستوى المخاطرة</div>
+        <div class="risk-chip-val">${d.risk_level||'—'}</div>
+      </div>
+      <div class="risk-chip">
+        <div class="risk-chip-label">ربح متوقع</div>
+        <div class="risk-chip-val" style="color:${d.upside_pct>0?'var(--green)':'var(--muted)'}">${d.upside_pct>0?'+'+d.upside_pct+'%':'—'}</div>
+      </div>
+    </div>
+    <div class="disclaimer">⚠️ التوصيات آلية فقط — لا تُعد نصيحة مالية</div>
+  `;
+}
+
+// ============================================================
+// Render: Congress tab
+// ============================================================
+function renderCongress(d) {
+  if (!d.trades || d.trades.length === 0) {
+    document.getElementById('congressContent').innerHTML = `
+      <div class="cong-summary">
+        <div class="cong-stat"><div class="cong-stat-val" style="color:var(--green)">0</div><div class="cong-stat-label">شراء</div></div>
+        <div class="cong-stat"><div class="cong-stat-val" style="color:var(--red)">0</div><div class="cong-stat-label">بيع</div></div>
+        <div class="cong-stat"><div class="cong-stat-val">0</div><div class="cong-stat-label">إجمالي</div></div>
+      </div>
+      <div class="state" style="padding:30px">لا توجد تداولات في آخر 90 يومًا</div>`;
+    return;
+  }
+  const items = d.trades.map(t => `
+    <div class="cong-item">
+      <div class="cong-left">
+        <div class="cong-trader">${t.trader}</div>
+        <div class="cong-chamber">${t.chamber === 'house' ? 'مجلس النواب' : 'مجلس الشيوخ'}${t.party ? ' · ' + t.party : ''}</div>
+      </div>
+      <div class="cong-right">
+        <div class="cong-type ${t.type}">${t.type === 'purchase' ? 'شراء' : 'بيع'}</div>
+        <div class="cong-amount">${t.amount}</div>
+        <div class="cong-date">${t.date}</div>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('congressContent').innerHTML = `
+    <div class="cong-summary">
+      <div class="cong-stat"><div class="cong-stat-val" style="color:var(--green)">${d.buys}</div><div class="cong-stat-label">شراء</div></div>
+      <div class="cong-stat"><div class="cong-stat-val" style="color:var(--red)">${d.sells}</div><div class="cong-stat-label">بيع</div></div>
+      <div class="cong-stat"><div class="cong-stat-val">${d.total}</div><div class="cong-stat-label">إجمالي</div></div>
+    </div>
+    <div class="cong-list">${items}</div>`;
+}
+
+// ============================================================
+// Render: News tab
+// ============================================================
+function renderNews(d) {
+  if (!d.news || d.news.length === 0) {
+    document.getElementById('newsContent').innerHTML =
+      '<div class="state">لا توجد أخبار متاحة</div>';
+    return;
+  }
+  const items = d.news.map(n => {
+    const sentClass = n.sentiment > 0 ? 'sent-pos' : n.sentiment < 0 ? 'sent-neg' : 'sent-neu';
+    const ago = timeAgo(n.published_at);
+    return `
+      <a class="news-item" href="${n.url||'#'}" target="_blank" rel="noopener">
+        <div class="news-sentiment ${sentClass}"></div>
+        <div class="news-content">
+          <div class="news-title">${n.title}</div>
+          <div class="news-meta">${n.publisher}${ago ? ' · '+ago : ''}</div>
+        </div>
+      </a>`;
+  }).join('');
+  document.getElementById('newsContent').innerHTML = `<div class="news-list">${items}</div>`;
+}
+
+// ============================================================
+// Chart helpers
+// ============================================================
 function switchChart(mode, el) {
   document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   chartMode = mode;
-  if (lastData) buildChart(lastData, mode);
+  if (tabData.analysis) buildChart(tabData.analysis, mode);
 }
 
 function buildChart(d, mode) {
   if (chartInst) { chartInst.destroy(); chartInst = null; }
-  const cc  = d.candles.filter(c => c.close != null).slice(-90);
+  const cc  = (d.candles||[]).filter(c => c.close != null).slice(-90);
   const lbl = cc.map(c => {
     const dt = new Date(c.time);
     return `${dt.getMonth()+1}/${dt.getDate()}`;
@@ -330,7 +756,7 @@ function buildChart(d, mode) {
     chartInst = new Chart(ctx, {type:'bar', data:{labels:lbl, datasets:[{
       label:'الحجم',
       data:cc.map(c=>c.volume),
-      backgroundColor:cc.map((c,i)=> i===0?'#58a6ff44': c.close>=(cc[i-1]?.close??c.close)?'#3fb95077':'#f8514977'),
+      backgroundColor:cc.map((c,i)=>i===0?'#58a6ff44':c.close>=(cc[i-1]?.close??c.close)?'#3fb95077':'#f8514977'),
       borderRadius:2
     }]}, options:{...base,scales:{...base.scales,y:{...base.scales.y,ticks:{color:'#7d8590',font:{size:10},
       callback:v=>v>=1e9?`${(v/1e9).toFixed(1)}B`:v>=1e6?`${(v/1e6).toFixed(1)}M`:`${v}`}}}}});
@@ -344,8 +770,11 @@ function buildChart(d, mode) {
   }
 }
 
+// ============================================================
+// Utility
+// ============================================================
 function fmt(n) {
-  if (n==null) return '—';
+  if (n == null) return '—';
   n = parseFloat(n);
   if (isNaN(n)) return '—';
   if (n >= 1000) return n.toLocaleString('en-US',{maximumFractionDigits:2});
@@ -353,8 +782,22 @@ function fmt(n) {
   return n.toPrecision(4);
 }
 
-// تحميل تلقائي
-analyze();
+function timeAgo(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 60) return `${m}د`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}س`;
+  return `${Math.floor(h/24)}ي`;
+}
+
+// ============================================================
+// Boot
+// ============================================================
+// Hide range tabs when not on analysis tab by default (analysis is default)
+document.getElementById('rangeTabs').style.display = 'flex';
+onSearch();
 </script>
 </body>
 </html>
