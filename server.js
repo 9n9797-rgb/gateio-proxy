@@ -36,6 +36,177 @@ const upstreamError = (e, extra = {}) => ({
   ...extra
 });
 
+// Cache
+const _cache = new Map();
+const memoGet = (key, fn, ttl) => {
+  const h = _cache.get(key);
+  if (h && Date.now() - h.at < ttl) return Promise.resolve(h.v);
+  return fn().then(v => { _cache.set(key, { v, at: Date.now() }); return v; });
+};
+
+// Sentiment
+const POS_W = ['surge','beat','record','profit','growth','buy','upgrade','strong','bullish','gains','rally','soar','positive','exceed','revenue','innovation'];
+const NEG_W = ['drop','miss','loss','decline','cut','downgrade','weak','bearish','sell','fall','crash','risk','lower','concern','lawsuit','investigation','fraud'];
+const calcSentiment = t => Math.max(-2, Math.min(2,
+  POS_W.filter(w => (t||'').toLowerCase().includes(w)).length -
+  NEG_W.filter(w => (t||'').toLowerCase().includes(w)).length
+));
+
+// ===== دوال داخلية: أخبار / كونغرس / توصية =====
+async function fetchNews(symbol) {
+  // Try Yahoo Finance search API for news
+  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=8&enableFuzzyQuery=false&quotesCount=0`;
+  const r = await withTimeout(fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible)', 'Accept': 'application/json' }
+  }), 8000);
+  const json = await r.json();
+  return (json?.news || []).map(n => ({
+    title: n.title || '',
+    publisher: n.publisher || '',
+    published_at: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
+    url: n.link || '',
+    sentiment: calcSentiment(n.title)
+  }));
+}
+
+async function fetchCongressTrades(symbol, days = 90) {
+  const since = new Date(Date.now() - days * 86400000);
+  const headers = { 'User-Agent': 'Mozilla/5.0 (compatible)' };
+
+  const [house, senate] = await Promise.all([
+    memoGet('house_all', async () => {
+      const r = await withTimeout(fetch(
+        'https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json',
+        { headers }), 25000);
+      const d = await r.json();
+      return Array.isArray(d) ? d : [];
+    }, 2 * 3600000),
+
+    memoGet('senate_all', async () => {
+      const r = await withTimeout(fetch(
+        'https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json',
+        { headers }), 25000);
+      const d = await r.json();
+      return Array.isArray(d) ? d : [];
+    }, 2 * 3600000)
+  ]);
+
+  const mapHouse = t => ({
+    trader:  t.representative || 'Unknown',
+    party:   t.party || null,
+    type:    (t.type || '').toLowerCase().includes('purchase') ? 'purchase' : 'sale',
+    amount:  t.amount || '',
+    date:    t.transaction_date || t.disclosure_date || '',
+    chamber: 'house'
+  });
+
+  const mapSenate = t => ({
+    trader:  t.senator || `${t.first_name || ''} ${t.last_name || ''}`.trim() || 'Unknown',
+    party:   t.party || null,
+    type:    (t.type || '').toLowerCase().includes('purchase') ? 'purchase' : 'sale',
+    amount:  t.amount || '',
+    date:    t.transaction_date || '',
+    chamber: 'senate'
+  });
+
+  const all = [
+    ...house.filter(t => (t.ticker||'').toUpperCase() === symbol && t.transaction_date && new Date(t.transaction_date) >= since).map(mapHouse),
+    ...senate.filter(t => (t.ticker||'').toUpperCase() === symbol && t.transaction_date && new Date(t.transaction_date) >= since).map(mapSenate)
+  ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 30);
+
+  return {
+    trades: all,
+    buys:  all.filter(t => t.type === 'purchase').length,
+    sells: all.filter(t => t.type === 'sale').length,
+    total: all.length
+  };
+}
+
+function buildRecommendation(analysis, congress, news) {
+  // --- Technical score (max 4) ---
+  let tech = 0;
+  const { rsi, obv_trend, above_ma20, price, high, low } = analysis;
+  if (rsi >= 35 && rsi <= 55)      tech += 1.5;
+  else if (rsi < 30)               tech += 0.5;  // oversold bounce
+  else if (rsi > 70)               tech -= 1.5;
+  if (obv_trend === 'rising')      tech += 1.5;
+  else if (obv_trend === 'falling') tech -= 1.0;
+  if (above_ma20)                  tech += 1.0;
+  tech = Math.max(-4, Math.min(4, tech));
+
+  // --- Congress score (max 3) ---
+  let cong = 0;
+  if (congress.total > 0) {
+    cong = ((congress.buys - congress.sells) / congress.total) * 3;
+  }
+  cong = Math.max(-3, Math.min(3, cong));
+
+  // --- News score (max 3) ---
+  let newsScore = 0;
+  if (news.length > 0) {
+    newsScore = (news.reduce((a, n) => a + n.sentiment, 0) / news.length) * 1.5;
+  }
+  newsScore = Math.max(-3, Math.min(3, newsScore));
+
+  const total = Math.round((tech + cong + newsScore) * 10) / 10;
+
+  // Recommendation
+  let rec, recAr, confidence;
+  if      (total >= 5)  { rec = 'STRONG_BUY';  recAr = 'شراء قوي';    confidence = 85; }
+  else if (total >= 3)  { rec = 'BUY';          recAr = 'شراء';        confidence = 72; }
+  else if (total >= 1)  { rec = 'HOLD';         recAr = 'احتفظ';       confidence = 60; }
+  else if (total >= -1) { rec = 'WATCH';        recAr = 'مراقبة';      confidence = 50; }
+  else if (total >= -3) { rec = 'SELL';         recAr = 'بيع';         confidence = 65; }
+  else                  { rec = 'STRONG_SELL';  recAr = 'بيع قوي';     confidence = 80; }
+
+  if (congress.total === 0) confidence = Math.max(40, confidence - 10);
+  if (news.length === 0)    confidence = Math.max(40, confidence - 5);
+  confidence = Math.min(95, confidence);
+
+  // Price targets
+  const volatility = low > 0 ? (high - low) / low : 0.15;
+  let upsidePct = 0, timeFrame = 'غير محدد', riskLevel = 'متوسط';
+
+  if (total >= 5)       { upsidePct = Math.min(volatility * 80, 40);  timeFrame = '2-4 أسابيع';  riskLevel = 'متوسط'; }
+  else if (total >= 3)  { upsidePct = Math.min(volatility * 55, 25);  timeFrame = '4-8 أسابيع';  riskLevel = 'متوسط'; }
+  else if (total >= 1)  { upsidePct = Math.min(volatility * 30, 15);  timeFrame = '8-16 أسابيع'; riskLevel = 'منخفض-متوسط'; }
+  else if (total < -1)  { upsidePct = 0;                              timeFrame = '-';            riskLevel = 'مرتفع'; }
+
+  upsidePct = Math.round(upsidePct * 10) / 10;
+  const targetPrice = upsidePct > 0 ? Math.round(price * (1 + upsidePct / 100) * 100) / 100 : null;
+  const stopLoss    = upsidePct > 0 ? Math.round(price * (1 - (upsidePct / 100) / 2.5) * 100) / 100 : null;
+  const rrRatio     = upsidePct > 0 ? `1:${Math.round((upsidePct / ((price - stopLoss) / price * 100)) * 10) / 10}` : null;
+
+  // Daily tip text
+  const tips = {
+    STRONG_BUY:  `فرصة قوية — دخول تدريجي 3 مراحل. الهدف $${targetPrice} (+${upsidePct}%) خلال ${timeFrame}`,
+    BUY:         `دخول مدروس — خصص 30-50% من المخصص. الهدف $${targetPrice} (+${upsidePct}%) خلال ${timeFrame}`,
+    HOLD:        `احتفظ بمركزك — الهدف $${targetPrice} على المدى المتوسط (${timeFrame})`,
+    WATCH:       `راقب السهم — انتظر كسر مستوى واضح قبل الدخول`,
+    SELL:        `قلّص مركزك — ضع حد خسارة وانتظر التصحيح`,
+    STRONG_SELL: `تجنب الدخول — ضغط بيع مرتفع، خطر كبير حالياً`
+  };
+
+  return {
+    recommendation:    rec,
+    recommendation_ar: recAr,
+    confidence,
+    total_score: total,
+    target_price: targetPrice,
+    stop_loss:    stopLoss,
+    rr_ratio:     rrRatio,
+    upside_pct:   upsidePct,
+    time_frame:   timeFrame,
+    risk_level:   riskLevel,
+    scores: {
+      technical: { value: Math.round(tech * 10) / 10,      label: tech >= 2 ? 'إيجابي قوي' : tech >= 0.5 ? 'إيجابي' : tech >= -0.5 ? 'محايد' : 'سلبي' },
+      congress:  { value: Math.round(cong * 10) / 10,      label: congress.total === 0 ? 'لا بيانات' : congress.buys > congress.sells ? `شراء (${congress.buys})` : `بيع (${congress.sells})` },
+      news:      { value: Math.round(newsScore * 10) / 10, label: newsScore > 0.5 ? 'إيجابي' : newsScore < -0.5 ? 'سلبي' : 'محايد' }
+    },
+    daily_tip: tips[rec] || tips.WATCH
+  };
+}
+
 // ===== الجذر (مؤشر) =====
 app.get("/", (req, res) => {
   res.json({
@@ -397,6 +568,132 @@ app.get("/proxy/stock/:symbol", async (req, res) => {
     });
   } catch (e) {
     res.status(200).json(upstreamError(e, { symbol }));
+  }
+});
+
+// GET /proxy/news/:symbol
+app.get("/proxy/news/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  try {
+    const news = await memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000);
+    res.json({ symbol, count: news.length, news });
+  } catch (e) {
+    res.json({ symbol, count: 0, news: [], error: String(e) });
+  }
+});
+
+// GET /proxy/congress/:symbol
+app.get("/proxy/congress/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const days   = Math.min(parseInt(req.query.days) || 90, 365);
+  try {
+    const data = await fetchCongressTrades(symbol, days);
+    res.json({ symbol, ...data });
+  } catch (e) {
+    res.json({ symbol, trades: [], buys: 0, sells: 0, total: 0, error: String(e) });
+  }
+});
+
+// GET /proxy/recommend/:symbol?type=stock|crypto&range=3mo
+app.get("/proxy/recommend/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const type   = req.query.type === 'crypto' ? 'crypto' : 'stock';
+  const range  = req.query.range || '3mo';
+
+  try {
+    let analysis;
+
+    if (type === 'crypto') {
+      // Use Gate.io candles
+      const pair  = symbol.includes('_') ? symbol : `${symbol}_USDT`;
+      const url   = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=60`;
+      const r     = await withTimeout(fetch(url), 8000);
+      const raw   = await r.json();
+      if (!Array.isArray(raw) || raw.length < 5)
+        return res.json({ error: 'بيانات غير كافية للعملة', symbol });
+
+      const closes  = raw.map(c => parseFloat(c[2]));
+      const highs   = raw.map(c => parseFloat(c[3]));
+      const lows    = raw.map(c => parseFloat(c[4]));
+      const volumes = raw.map(c => parseFloat(c[1]));
+      const last    = closes.length - 1;
+
+      const rsiArr  = calculateRSI(closes, 14);
+      const obvArr  = calculateOBV(closes, volumes);
+      const ma20Arr = calculateMA(closes, 20);
+      const obvTrend= getOBVTrend(obvArr);
+
+      analysis = {
+        symbol: pair, name: pair, type: 'crypto',
+        price:      closes[last],
+        change1d:   last > 0 ? Math.round(((closes[last]-closes[last-1])/closes[last-1])*10000)/100 : 0,
+        high:       Math.max(...highs),
+        low:        Math.min(...lows),
+        rsi:        Math.round((rsiArr[last]??50)*10)/10,
+        obv_trend:  obvTrend,
+        above_ma20: closes[last] > (ma20Arr[last] ?? closes[last]),
+        ma20:       Math.round((ma20Arr[last]??closes[last])*100)/100
+      };
+    } else {
+      // Use Yahoo Finance
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
+      const r   = await withTimeout(fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+      }), 8000);
+      const json   = await r.json();
+      const result = json?.chart?.result?.[0];
+      if (!result) return res.json({ error: 'رمز السهم غير موجود', symbol });
+
+      const meta    = result.meta;
+      const q       = result.indicators?.quote?.[0] || {};
+      const closes  = (q.close||[]).map(v=>v??0);
+      const highs   = (q.high||[]).map(v=>v??0);
+      const lows    = (q.low||[]).map(v=>v??0);
+      const volumes = (q.volume||[]).map(v=>v??0);
+      const last    = closes.length - 1;
+
+      const rsiArr  = calculateRSI(closes, 14);
+      const obvArr  = calculateOBV(closes, volumes);
+      const ma20Arr = calculateMA(closes, 20);
+      const obvTrend= getOBVTrend(obvArr);
+      const lastClose = meta.regularMarketPrice ?? closes[last];
+
+      analysis = {
+        symbol, name: meta.longName || meta.shortName || symbol, type: 'stock',
+        exchange:   meta.exchangeName || '',
+        price:      Math.round(lastClose * 100) / 100,
+        change1d:   Math.round((meta.regularMarketChangePercent ?? 0) * 100) / 100,
+        high:       Math.max(...highs.filter(Boolean)),
+        low:        Math.min(...lows.filter(Boolean)),
+        rsi:        Math.round((rsiArr[last]??50)*10)/10,
+        obv_trend:  obvTrend,
+        above_ma20: lastClose > (ma20Arr[last] ?? lastClose),
+        ma20:       Math.round((ma20Arr[last]??lastClose)*100)/100
+      };
+    }
+
+    // Parallel: congress (stocks only) + news
+    const [congressResult, newsResult] = await Promise.allSettled([
+      type === 'stock'
+        ? fetchCongressTrades(symbol, 90)
+        : Promise.resolve({ trades: [], buys: 0, sells: 0, total: 0 }),
+      memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000)
+    ]);
+
+    const congress = congressResult.status === 'fulfilled' ? congressResult.value : { trades: [], buys: 0, sells: 0, total: 0 };
+    const news     = newsResult.status === 'fulfilled' ? newsResult.value : [];
+
+    const rec = buildRecommendation(analysis, congress, news);
+
+    res.json({
+      date: new Date().toISOString().split('T')[0],
+      ...analysis,
+      ...rec,
+      congress_activity: congress.trades.slice(0, 10),
+      recent_news:       news.slice(0, 6)
+    });
+  } catch (e) {
+    res.json(upstreamError(e, { symbol }));
   }
 });
 
