@@ -475,6 +475,268 @@ function calculateMACD(closes) {
   return { line, signal, hist: line.map((v, i) => v - signal[i]) };
 }
 
+// === Bollinger Bands ===
+function calculateBollingerBands(closes, period = 20, mult = 2) {
+  const ma = calculateMA(closes, period);
+  return closes.map((_, i) => {
+    if (i < period - 1 || ma[i] == null) return { upper: null, middle: null, lower: null, pct: null };
+    const slice = closes.slice(i - period + 1, i + 1);
+    const std   = Math.sqrt(slice.reduce((s, v) => s + (v - ma[i]) ** 2, 0) / period);
+    const upper = ma[i] + mult * std;
+    const lower = ma[i] - mult * std;
+    return {
+      upper:  Math.round(upper  * 100) / 100,
+      middle: Math.round(ma[i]  * 100) / 100,
+      lower:  Math.round(lower  * 100) / 100,
+      pct:    upper !== lower ? Math.round((closes[i] - lower) / (upper - lower) * 100) : 50
+    };
+  });
+}
+
+// === Average True Range ===
+function calculateATR(highs, lows, closes, period = 14) {
+  const tr = highs.map((h, i) =>
+    i === 0 ? h - lows[i]
+      : Math.max(h - lows[i], Math.abs(h - closes[i-1]), Math.abs(lows[i] - closes[i-1]))
+  );
+  const result = new Array(period).fill(null);
+  let atr = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  result.push(atr);
+  for (let i = period; i < tr.length; i++) {
+    atr = (atr * (period - 1) + tr[i]) / period;
+    result.push(atr);
+  }
+  return result;
+}
+
+// === Stochastic RSI ===
+function calculateStochRSI(closes, period = 14, smoothK = 3, smoothD = 3) {
+  const rsi = calculateRSI(closes, period);
+  const raw = rsi.map((r, i) => {
+    if (r == null || i < period * 2) return null;
+    const win = rsi.slice(i - period + 1, i + 1).filter(v => v != null);
+    if (win.length < period) return null;
+    const lo = Math.min(...win), hi = Math.max(...win);
+    return hi === lo ? 50 : (r - lo) / (hi - lo) * 100;
+  });
+  const kArr = calculateMA(raw.map(v => v ?? 0), smoothK);
+  const dArr = calculateMA(kArr.map(v => v ?? 0), smoothD);
+  return {
+    k: raw.map((v, i) => v == null ? null : Math.round((kArr[i] ?? 0) * 10) / 10),
+    d: raw.map((v, i) => v == null ? null : Math.round((dArr[i] ?? 0) * 10) / 10)
+  };
+}
+
+// === Candlestick Pattern Detection ===
+function detectCandlePatterns(opens, highs, lows, closes) {
+  const patterns = [];
+  const n = closes.length;
+  for (let i = Math.max(1, n - 6); i < n; i++) {
+    const o = opens[i], h = highs[i], l = lows[i], c = closes[i];
+    const po = opens[i-1], pc = closes[i-1];
+    const body = Math.abs(c - o), range = h - l;
+    if (range < 1e-9) continue;
+    const upper = h - Math.max(o, c);
+    const lower = Math.min(o, c) - l;
+    if      (body / range < 0.08)
+      patterns.push({ bullish: null,  label: '◇ دوجي',              desc: 'تردد في السوق — انتظر اتجاهاً واضحاً' });
+    else if (lower > body * 2.5 && upper < body * 0.6 && c >= o)
+      patterns.push({ bullish: true,  label: '🔨 مطرقة',            desc: 'إشارة انعكاس صعودي محتملة' });
+    else if (upper > body * 2.5 && lower < body * 0.6 && c <= o)
+      patterns.push({ bullish: false, label: '💫 نجمة ساقطة',       desc: 'إشارة انعكاس هبوطي محتملة' });
+    else if (i > 0 && pc < po && c > o && c > po && o < pc)
+      patterns.push({ bullish: true,  label: '🟢 ابتلاع صعودي',     desc: 'إشارة شراء قوية جداً' });
+    else if (i > 0 && pc > po && c < o && c < po && o > pc)
+      patterns.push({ bullish: false, label: '🔴 ابتلاع هبوطي',     desc: 'إشارة بيع قوية' });
+    else if (upper < body * 0.05 && lower < body * 0.05 && c > o)
+      patterns.push({ bullish: true,  label: '🕯 شمعة صعودية كاملة', desc: 'تحكم كامل من المشترين' });
+    else if (upper < body * 0.05 && lower < body * 0.05 && c < o)
+      patterns.push({ bullish: false, label: '🕯 شمعة هبوطية كاملة', desc: 'تحكم كامل من البائعين' });
+  }
+  return patterns.slice(-4);
+}
+
+// === Market Regime ===
+function detectMarketRegime(closes) {
+  if (closes.length < 40) return { regime: 'غير محدد', icon: '❓', color: '#8b949e' };
+  const n = closes.length;
+  const ma20 = calculateMA(closes, 20);
+  const ma50 = calculateMA(closes, 50);
+  const last = closes[n-1], lma20 = ma20[n-1], lma50 = ma50[n-1] ?? last;
+  const ref  = ma20[n-10] ?? lma20 ?? 1;
+  const ma20Dir  = (lma20 - ref) / ref;
+  const rangeVol = (Math.max(...closes.slice(-20)) - Math.min(...closes.slice(-20))) / last;
+  if (last > lma20 && lma20 > lma50 && ma20Dir > 0.01)
+    return { regime: 'ترند صاعد قوي',  icon: '🚀', color: '#3fb950' };
+  if (last > lma20 && ma20Dir > 0)
+    return { regime: 'ترند صاعد',       icon: '📈', color: '#58c96a' };
+  if (last < lma20 && lma20 < lma50 && ma20Dir < -0.01)
+    return { regime: 'ترند هابط قوي',  icon: '📉', color: '#f85149' };
+  if (last < lma20 && ma20Dir < 0)
+    return { regime: 'ترند هابط',       icon: '🔻', color: '#f0883e' };
+  if (rangeVol > 0.12)
+    return { regime: 'متقلب',           icon: '⚡', color: '#d29922' };
+  return   { regime: 'متماسك',          icon: '〰️', color: '#8b949e' };
+}
+
+// === Support / Resistance (pivot-based) ===
+function findSupportResistance(highs, lows, closes, lookback = 60) {
+  const n  = closes.length, s = Math.max(0, n - lookback);
+  const rh = highs.slice(s), rl = lows.slice(s);
+  const price = closes[n - 1];
+  const pivH = [], pivL = [];
+  for (let i = 2; i < rh.length - 2; i++) {
+    if (rh[i] >= rh[i-1] && rh[i] >= rh[i-2] && rh[i] >= rh[i+1] && rh[i] >= rh[i+2]) pivH.push(rh[i]);
+    if (rl[i] <= rl[i-1] && rl[i] <= rl[i-2] && rl[i] <= rl[i+1] && rl[i] <= rl[i+2]) pivL.push(rl[i]);
+  }
+  const res = [...new Set(pivH.map(v => Math.round(v*100)/100))]
+    .filter(v => v > price * 1.001).sort((a,b) => a-b).slice(0,2);
+  const sup = [...new Set(pivL.map(v => Math.round(v*100)/100))]
+    .filter(v => v < price * 0.999).sort((a,b) => b-a).slice(0,2);
+  return { resistance: res, support: sup,
+    period_high: Math.round(Math.max(...rh)*100)/100,
+    period_low:  Math.round(Math.min(...rl)*100)/100 };
+}
+
+// === Volume Spike Detection ===
+function detectVolumeSpikes(volumes, closes) {
+  if (volumes.length < 20) return [];
+  const avg = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  const out = [];
+  for (let i = Math.max(0, volumes.length - 10); i < volumes.length; i++) {
+    if (volumes[i] > avg * 1.8)
+      out.push({ daysAgo: volumes.length - 1 - i,
+        ratio:   Math.round(volumes[i] / avg * 10) / 10,
+        bullish: closes[i] >= (closes[i-1] ?? closes[i]) });
+  }
+  return out;
+}
+
+// === AI Score Engine (0-100) ===
+function buildAIScore(closes, highs, lows, opens, volumes, congress, news) {
+  const n = closes.length;
+  if (n < 30) return null;
+  const rsiArr    = calculateRSI(closes, 14);
+  const obvArr    = calculateOBV(closes, volumes);
+  const ma20Arr   = calculateMA(closes, 20);
+  const ma50Arr   = calculateMA(closes, 50);
+  const bbArr     = calculateBollingerBands(closes);
+  const atrArr    = calculateATR(highs, lows, closes);
+  const stochRSI  = calculateStochRSI(closes);
+  const macdData  = calculateMACD(closes);
+  const rocArr    = calculateROC(closes, 20);
+  const patterns  = detectCandlePatterns(opens, highs, lows, closes);
+  const regime    = detectMarketRegime(closes);
+  const sr        = findSupportResistance(highs, lows, closes);
+  const volSpikes = detectVolumeSpikes(volumes, closes);
+  const obvTrend  = getOBVTrend(obvArr);
+  const i = n - 1;
+  const rsi   = rsiArr[i]  ?? 50;
+  const close = closes[i];
+  const ma20  = ma20Arr[i] ?? close;
+  const ma50  = ma50Arr[i] ?? close;
+  const bb    = bbArr[i];
+  const atr   = atrArr[i];
+  const stochK= stochRSI.k[i] ?? 50;
+  const stochD= stochRSI.d[i] ?? 50;
+  const macdL = macdData.line[i]   ?? 0;
+  const macdS = macdData.signal[i] ?? 0;
+  const roc20 = rocArr[i] ?? 0;
+
+  const S = {};
+  // RSI (max 20)
+  if      (rsi >= 38 && rsi <= 52) S.rsi = 20;
+  else if (rsi >= 32 && rsi < 38)  S.rsi = 14;
+  else if (rsi >= 52 && rsi <= 62) S.rsi = 12;
+  else if (rsi < 32)               S.rsi = 8;
+  else if (rsi > 62 && rsi <= 72)  S.rsi = 5;
+  else                             S.rsi = 0;
+  // MACD (max 18)
+  if      (macdL > macdS && macdL > 0 && roc20 > 2) S.macd = 18;
+  else if (macdL > macdS && macdL > 0)               S.macd = 13;
+  else if (macdL > macdS)                            S.macd = 8;
+  else if (macdL > 0)                                S.macd = 4;
+  else                                               S.macd = 0;
+  // OBV (max 18)
+  S.obv = obvTrend === 'rising' ? 18 : obvTrend === 'neutral' ? 6 : 0;
+  // Bollinger (max 15)
+  if (bb?.pct != null) {
+    if      (bb.pct >= 30 && bb.pct <= 55) S.bb = 15;
+    else if (bb.pct < 20)                  S.bb = 12;
+    else if (bb.pct >= 55 && bb.pct <= 70) S.bb = 8;
+    else if (bb.pct > 80)                  S.bb = 2;
+    else                                   S.bb = 5;
+  } else S.bb = 7;
+  // MA structure (max 12)
+  if      (close > ma20 && ma20 > ma50) S.ma = 12;
+  else if (close > ma20 && close > ma50) S.ma = 9;
+  else if (close > ma20)                S.ma = 5;
+  else if (close > ma50)                S.ma = 3;
+  else                                  S.ma = 0;
+  // StochRSI (max 10)
+  if      (stochK >= 20 && stochK <= 55 && stochK > stochD) S.stoch = 10;
+  else if (stochK < 20)                                      S.stoch = 8;
+  else if (stochK > 55 && stochK <= 75)                      S.stoch = 5;
+  else                                                       S.stoch = 2;
+  // Volume spikes (max 8)
+  const bullSp = volSpikes.find(s => s.bullish  && s.daysAgo <= 5);
+  const bearSp = volSpikes.find(s => !s.bullish && s.daysAgo <= 5);
+  S.vol = bullSp ? 8 : bearSp ? 0 : 4;
+  // Patterns (max 7)
+  const bPat = patterns.filter(p => p.bullish === true);
+  const sPat = patterns.filter(p => p.bullish === false);
+  S.pat = bPat.length >= 2 ? 7 : bPat.length === 1 ? 5 : sPat.length >= 1 ? 0 : 3;
+  // Congress (max 5)
+  S.congress = congress.total > 0
+    ? Math.min(5, Math.max(0, Math.round(((congress.buys - congress.sells) / congress.total + 1) / 2 * 5)))
+    : 2;
+  // News (max 5)
+  if (news.length > 0) {
+    const avg = news.reduce((a, nx) => a + nx.sentiment, 0) / news.length;
+    S.news = Math.min(5, Math.max(0, Math.round((avg + 2) / 4 * 5)));
+  } else S.news = 2;
+
+  const total = Math.min(100, Object.values(S).reduce((a, b) => a + b, 0));
+
+  let grade, gradeColor, gradeLabel;
+  if      (total >= 80) { grade='A'; gradeColor='#3fb950'; gradeLabel='ممتاز — إشارة شراء قوية'; }
+  else if (total >= 65) { grade='B'; gradeColor='#58c96a'; gradeLabel='جيد — إشارة دخول معقولة'; }
+  else if (total >= 50) { grade='C'; gradeColor='#d29922'; gradeLabel='محايد — انتظر تأكيداً'; }
+  else if (total >= 35) { grade='D'; gradeColor='#f0883e'; gradeLabel='ضعيف — تجنب الدخول الآن'; }
+  else                  { grade='F'; gradeColor='#f85149'; gradeLabel='خطر — إشارات سلبية واضحة'; }
+
+  let entrySignal;
+  if      (total >= 65 && close > ma20)          entrySignal = { type:'buy',    label:'✅ دخول مناسب',   desc:'الشروط مهيأة — ادخل بـ 30-50% من المخصص', color:'#3fb950' };
+  else if (total >= 50)                           entrySignal = { type:'watch',  label:'👀 راقب وانتظر', desc:'إشارات محايدة — انتظر تأكيداً إضافياً',    color:'#d29922' };
+  else if (rsi < 32 && obvTrend !== 'falling')    entrySignal = { type:'bounce', label:'🎯 فرصة ارتداد', desc:'تشبع بيعي — قد يرتد بالدفعات التدريجية',   color:'#58a6ff' };
+  else                                            entrySignal = { type:'avoid',  label:'🚫 تجنب الآن',   desc:'مؤشرات ضعيفة — انتظر تحسن الصورة',        color:'#f85149' };
+
+  const atrStop   = atr ? Math.round((close - 2.0 * atr) * 100) / 100 : null;
+  const atrTarget = atr ? Math.round((close + 3.0 * atr) * 100) / 100 : null;
+  const atrRR     = (atrStop && atrTarget && close > atrStop)
+    ? `1:${Math.round((atrTarget - close) / (close - atrStop) * 10) / 10}` : null;
+
+  const bbSeries = bbArr.slice(-60).map(b =>
+    b?.upper ? { upper: b.upper, middle: b.middle, lower: b.lower } : { upper: null, middle: null, lower: null }
+  );
+
+  return {
+    ai_score: total, grade, grade_color: gradeColor, grade_label: gradeLabel,
+    score_components: S, entry_signal: entrySignal, regime,
+    patterns: patterns.slice(-4), support_resistance: sr,
+    volume_spikes: volSpikes.slice(-5),
+    bollinger: bb ? { upper: bb.upper, middle: bb.middle, lower: bb.lower, position_pct: bb.pct } : null,
+    stoch_rsi: { k: Math.round((stochK??50)*10)/10, d: Math.round((stochD??50)*10)/10 },
+    rsi: Math.round(rsi*10)/10, roc20: Math.round(roc20*10)/10,
+    macd: { bullish: macdL > macdS },
+    atr: atr ? Math.round(atr*1000)/1000 : null,
+    atr_stop: atrStop, atr_target: atrTarget, atr_rr: atrRR,
+    ma: { ma20: Math.round(ma20*100)/100, ma50: Math.round(ma50*100)/100,
+          above_20: close > ma20, above_50: close > ma50, bullish_cross: ma20 > ma50 },
+    bb_series: bbSeries
+  };
+}
+
 // ===== تحليل التجميع =====
 app.get("/proxy/analyze/:pair", async (req, res) => {
   const pair = req.params.pair.toUpperCase();
@@ -1019,6 +1281,74 @@ app.get("/proxy/backtest/:symbol", async (req, res) => {
     const result = runBacktest(candles, capital);
     res.json({ symbol, type, range, ...result });
   } catch (e) {
+    res.json(upstreamError(e, { symbol }));
+  }
+});
+
+// GET /proxy/ai/:symbol?type=stock|crypto&range=3mo
+app.get("/proxy/ai/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const type   = req.query.type === 'crypto' ? 'crypto' : 'stock';
+  const range  = ['1mo','3mo','6mo','1y'].includes(req.query.range) ? req.query.range : '3mo';
+
+  try {
+    let closes, highs, lows, opens, volumes, times;
+    if (type === 'crypto') {
+      const pair = symbol.includes('_') ? symbol : `${symbol}_USDT`;
+      const url  = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=120`;
+      const r    = await withTimeout(fetch(url), 8000);
+      const raw  = await r.json();
+      if (!Array.isArray(raw) || raw.length < 30) return res.json({ error: 'بيانات غير كافية', symbol });
+      closes  = raw.map(c => parseFloat(c[2]));
+      highs   = raw.map(c => parseFloat(c[3]));
+      lows    = raw.map(c => parseFloat(c[4]));
+      opens   = raw.map(c => parseFloat(c[5]));
+      volumes = raw.map(c => parseFloat(c[1]));
+      times   = raw.map(c => parseInt(c[0]) * 1000);
+    } else {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
+      const r   = await withTimeout(fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }), 8000);
+      const json   = await r.json();
+      const result = json?.chart?.result?.[0];
+      if (!result) return res.json({ error: 'رمز السهم غير موجود', symbol });
+      const q = result.indicators?.quote?.[0] || {};
+      times   = (result.timestamp || []).map(t => t * 1000);
+      closes  = (q.close  || []).map(v => v ?? 0);
+      highs   = (q.high   || []).map(v => v ?? 0);
+      lows    = (q.low    || []).map(v => v ?? 0);
+      opens   = (q.open   || []).map(v => v ?? 0);
+      volumes = (q.volume || []).map(v => v ?? 0);
+    }
+    // Filter zero-close candles
+    const valid = times.reduce((acc, t, i) => {
+      if (closes[i] > 0) acc.push({ t, o: opens[i], h: highs[i], l: lows[i], c: closes[i], v: volumes[i] });
+      return acc;
+    }, []);
+    if (valid.length < 30) return res.json({ error: 'بيانات غير كافية', symbol });
+    times   = valid.map(x => x.t);
+    opens   = valid.map(x => x.o);
+    highs   = valid.map(x => x.h);
+    lows    = valid.map(x => x.l);
+    closes  = valid.map(x => x.c);
+    volumes = valid.map(x => x.v);
+
+    const [congressRes, newsRes] = await Promise.allSettled([
+      type === 'stock'
+        ? fetchCongressTrades(symbol, 90)
+        : Promise.resolve({ trades:[], buys:0, sells:0, total:0 }),
+      memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000)
+    ]);
+    const congress = congressRes.status === 'fulfilled' ? congressRes.value : { trades:[], buys:0, sells:0, total:0 };
+    const news     = newsRes.status   === 'fulfilled' ? newsRes.value   : [];
+
+    const ai = buildAIScore(closes, highs, lows, opens, volumes, congress, news);
+    if (!ai) return res.json({ error: 'خطأ في الحساب', symbol });
+
+    ai.chart_times  = times.slice(-60).map(t => { const d = new Date(t); return `${d.getMonth()+1}/${d.getDate()}`; });
+    ai.close_series = closes.slice(-60).map(c => Math.round(c * 100) / 100);
+    ai.current_price = Math.round(closes[closes.length - 1] * 100) / 100;
+    res.json({ symbol, type, ...ai });
+  } catch(e) {
     res.json(upstreamError(e, { symbol }));
   }
 });

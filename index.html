@@ -277,6 +277,10 @@
   <div id="backtestContent" class="state"><div>اضغط "اختبر" لتشغيل الباكتست</div></div>
 </div>
 
+<div id="tabAi" class="tab-panel">
+  <div id="aiContent" class="state"><div>اضغط تحليل لتشغيل التحليل الذكي</div></div>
+</div>
+
 <!-- Bottom navigation -->
 <nav class="bottom-nav">
   <div class="nav-item active" id="navAnalysis" onclick="switchTab('analysis')">
@@ -294,6 +298,9 @@
   <div class="nav-item" id="navBacktest" onclick="switchTab('backtest')">
     <span class="nav-icon">⏱️</span><span class="nav-label">باكتست</span>
   </div>
+  <div class="nav-item" id="navAi" onclick="switchTab('ai')">
+    <span class="nav-icon">🤖</span><span class="nav-label">ذكاء</span>
+  </div>
 </nav>
 
 <script>
@@ -308,8 +315,8 @@ let currentSym = 'AAPL';
 let activeTab = 'analysis';
 
 // Cache loaded data per-tab
-let tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null };
-let tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false };
+let tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null };
+let tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false };
 let btRange = '2y';
 let btChartInst = null;
 
@@ -336,8 +343,8 @@ function setType(type) {
   document.getElementById('symInput').value = currentSym;
   // Show/hide range tabs (crypto uses Gate.io directly, range irrelevant but keep for UX)
   // Reset all tabs
-  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false };
-  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null };
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false };
+  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null };
   onSearch();
 }
 
@@ -350,8 +357,8 @@ function quickSym(el, sym) {
   currentSym = sym;
   document.getElementById('symInput').value = sym;
   // Reset tab cache
-  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false };
-  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null };
+  tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false };
+  tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null };
   onSearch();
 }
 
@@ -374,8 +381,8 @@ function onSearch() {
   const sym = document.getElementById('symInput').value.trim().toUpperCase();
   if (!sym) return;
   if (sym !== currentSym) {
-    tabLoaded = { analysis: false, recommend: false, congress: false, news: false };
-    tabData = { analysis: null, recommend: null, congress: null, news: null };
+    tabLoaded = { analysis: false, recommend: false, congress: false, news: false, ai: false };
+    tabData = { analysis: null, recommend: null, congress: null, news: null, ai: null };
   }
   currentSym = sym;
   document.getElementById('headerSym').textContent = sym;
@@ -391,8 +398,9 @@ function onSearch() {
 // ============================================================
 function switchTab(tab) {
   activeTab = tab;
-  ['analysis','recommend','congress','news','backtest'].forEach(t => {
-    document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}`).classList.toggle('active', t === tab);
+  ['analysis','recommend','congress','news','backtest','ai'].forEach(t => {
+    const panel = document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}`);
+    if (panel) panel.classList.toggle('active', t === tab);
     const nav = document.getElementById(`nav${t.charAt(0).toUpperCase()+t.slice(1)}`);
     if (nav) nav.classList.toggle('active', t === tab);
   });
@@ -486,6 +494,20 @@ async function loadTab(tab) {
       tabData.news = d;
       tabLoaded.news = true;
       renderNews(d);
+    } catch(e) {
+      el.innerHTML = `<div class="state">خطأ: ${e.message}</div>`;
+    }
+  } else if (tab === 'ai') {
+    const el = document.getElementById('aiContent');
+    el.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري تحليل الذكاء الاصطناعي…</div></div>';
+    try {
+      const typeParam = currentType === 'crypto' ? 'crypto' : 'stock';
+      const r = await fetch(`/proxy/ai/${sym}?type=${typeParam}&range=${currentRange}`);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      tabData.ai = d;
+      tabLoaded.ai = true;
+      renderAI(d);
     } catch(e) {
       el.innerHTML = `<div class="state">خطأ: ${e.message}</div>`;
     }
@@ -1169,6 +1191,188 @@ function buildBtChart(basicEq, momEq) {
       scales:{
         x:{ grid:{color:'#21262d'}, ticks:{color:'#7d8590',maxTicksLimit:6,font:{size:10}} },
         y:{ grid:{color:'#21262d'}, ticks:{color:'#7d8590',font:{size:10},callback:v=>`$${fmt(v)}`} }
+      }
+    }
+  });
+}
+
+// ============================================================
+// AI Analysis tab
+// ============================================================
+function renderAI(d) {
+  const gc = d.grade_color || '#8b949e';
+  const S  = d.score_components || {};
+  const sr = d.support_resistance || {};
+  const bb = d.bollinger || {};
+  const ma = d.ma || {};
+  const prefix = currentType === 'crypto' ? '' : '$';
+  const r = 36, circ = 2 * Math.PI * r, offset = circ * (1 - (d.ai_score||0) / 100);
+
+  const scoreMaxes  = { rsi:20, macd:18, obv:18, bb:15, ma:12, stoch:10, vol:8, pat:7, congress:5, news:5 };
+  const scoreLabels = { rsi:'RSI', macd:'MACD', obv:'OBV', bb:'بولنجر', ma:'هيكل MA', stoch:'StochRSI', vol:'حجم', pat:'نماذج', congress:'كونغرس', news:'أخبار' };
+  const scoreRows = Object.entries(S).map(([k, v]) => {
+    const max = scoreMaxes[k] || 10;
+    const pct = Math.round(v / max * 100);
+    const c2  = pct >= 70 ? '#3fb950' : pct >= 40 ? '#d29922' : '#f85149';
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="font-size:11px;color:var(--muted);width:58px;text-align:right;flex-shrink:0">${scoreLabels[k]||k}</div>
+      <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${c2};border-radius:3px"></div>
+      </div>
+      <div style="font-size:10px;font-weight:600;width:32px;direction:ltr;color:${c2}">${v}/${max}</div>
+    </div>`;
+  }).join('');
+
+  const patHtml = (d.patterns||[]).length > 0
+    ? (d.patterns||[]).map(p => {
+        const c2 = p.bullish===true?'#3fb950':p.bullish===false?'#f85149':'#d29922';
+        return `<div style="background:${c2}22;border:1px solid ${c2};border-radius:8px;padding:7px 11px;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:600;color:${c2}">${p.label}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${p.desc}</div>
+        </div>`;
+      }).join('')
+    : '<div style="font-size:12px;color:var(--muted);padding:6px 0">لا توجد نماذج واضحة حالياً</div>';
+
+  const vsHtml = (d.volume_spikes||[]).length > 0
+    ? (d.volume_spikes||[]).map(s => {
+        const c2 = s.bullish?'var(--green)':'var(--red)';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:12px;color:${c2};font-weight:600">${s.bullish?'↑ تراكم':'↓ توزيع'} &times;${s.ratio}</span>
+          <span style="font-size:11px;color:var(--muted)">قبل ${s.daysAgo} يوم</span>
+        </div>`;
+      }).join('')
+    : '<div style="font-size:12px;color:var(--muted);padding:4px 0">لا حجم غير اعتيادي</div>';
+
+  const res1 = sr.resistance?.[0], res2 = sr.resistance?.[1];
+  const sup1 = sr.support?.[0],    sup2 = sr.support?.[1];
+
+  document.getElementById('aiContent').innerHTML = `
+    <div style="text-align:center;padding:20px 16px 10px">
+      <div style="position:relative;display:inline-block;width:110px;height:110px">
+        <svg width="110" height="110" viewBox="0 0 110 110" style="transform:rotate(-90deg)">
+          <circle cx="55" cy="55" r="${r}" fill="none" stroke="var(--border)" stroke-width="10"/>
+          <circle cx="55" cy="55" r="${r}" fill="none" stroke="${gc}" stroke-width="10"
+            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}" stroke-linecap="round"/>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <div style="font-size:30px;font-weight:700;color:${gc};line-height:1">${d.ai_score}</div>
+          <div style="font-size:20px;font-weight:700;color:${gc}">${d.grade}</div>
+        </div>
+      </div>
+      <div style="font-size:14px;font-weight:600;color:${gc};margin-top:6px">${d.grade_label}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">${d.symbol||currentSym} · ${prefix}${fmt(d.current_price)}</div>
+    </div>
+
+    <div style="margin:0 16px 12px;background:${(d.entry_signal?.color||'#8b949e')}22;border:1px solid ${d.entry_signal?.color||'#8b949e'};border-radius:12px;padding:12px 16px">
+      <div style="font-size:16px;font-weight:700;color:${d.entry_signal?.color}">${d.entry_signal?.label||''}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">${d.entry_signal?.desc||''}</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:0 16px 12px">
+      <div style="background:${(d.regime?.color||'#8b949e')}22;border:1px solid ${d.regime?.color||'#8b949e'};border-radius:10px;padding:8px 10px;text-align:center">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">وضع السوق</div>
+        <div style="font-size:12px;font-weight:700;color:${d.regime?.color}">${d.regime?.icon} ${d.regime?.regime}</div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;text-align:center">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">MACD</div>
+        <div style="font-size:13px;font-weight:700;color:${d.macd?.bullish?'var(--green)':'var(--red)'}">${d.macd?.bullish?'↑ صاعد':'↓ هابط'}</div>
+        <div style="font-size:10px;color:var(--muted)">ROC:${d.roc20}%</div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;text-align:center">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">StochRSI</div>
+        <div style="font-size:12px;font-weight:600;color:${(d.stoch_rsi?.k??50)<25?'var(--green)':(d.stoch_rsi?.k??50)>75?'var(--red)':'var(--muted)'}">K:${d.stoch_rsi?.k}</div>
+        <div style="font-size:10px;color:var(--muted)">D:${d.stoch_rsi?.d}</div>
+      </div>
+    </div>
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;margin:0 16px 12px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">تفاصيل الدرجة الذكية</div>
+      ${scoreRows}
+    </div>
+
+    <div style="padding:0 16px 8px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">السعر + بولنجر باند</div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;height:210px">
+        <canvas id="aiChart"></canvas>
+      </div>
+    </div>
+
+    ${bb.position_pct != null ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:0 16px 12px">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 10px;text-align:center">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">موقع BB</div>
+        <div style="font-size:17px;font-weight:700;color:${bb.position_pct>75?'var(--red)':bb.position_pct<25?'var(--green)':'var(--yellow)'}">${bb.position_pct}%</div>
+        <div style="font-size:10px;color:var(--muted)">${bb.position_pct>75?'عند الحد الأعلى':bb.position_pct<25?'عند الحد الأدنى':'منطقة وسط'}</div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 10px;text-align:center">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">هيكل MA</div>
+        <div style="font-size:12px;font-weight:700;color:${ma.above_20&&ma.above_50?'var(--green)':ma.above_20?'var(--yellow)':'var(--red)'}">${ma.above_20?'فوق MA20':'تحت MA20'}</div>
+        <div style="font-size:10px;color:var(--muted)">${ma.bullish_cross?'MA20>MA50 ✓':'MA20<MA50'}</div>
+      </div>
+      ${d.atr_stop?`<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 10px;text-align:center">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px">وقف ATR</div>
+        <div style="font-size:13px;font-weight:700;color:var(--red)">${prefix}${fmt(d.atr_stop)}</div>
+        <div style="font-size:10px;color:var(--muted)">هدف:${prefix}${fmt(d.atr_target)}</div>
+      </div>`:'<div></div>'}
+    </div>` : ''}
+
+    <div style="padding:0 16px 12px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">الدعم والمقاومة</div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px">
+        ${res1?`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:12px;color:var(--red);font-weight:600">مقاومة ${res2?'1':''}</span><span style="font-size:13px;font-weight:700;direction:ltr">${prefix}${fmt(res1)}</span></div>`:''}
+        ${res2?`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:12px;color:#f0883e;font-weight:600">مقاومة 2</span><span style="font-size:13px;font-weight:700;direction:ltr">${prefix}${fmt(res2)}</span></div>`:''}
+        ${sup1?`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;${sup2?'border-bottom:1px solid var(--border)':''}"><span style="font-size:12px;color:var(--green);font-weight:600">دعم ${sup2?'1':''}</span><span style="font-size:13px;font-weight:700;direction:ltr">${prefix}${fmt(sup1)}</span></div>`:''}
+        ${sup2?`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0"><span style="font-size:12px;color:#58c96a;font-weight:600">دعم 2</span><span style="font-size:13px;font-weight:700;direction:ltr">${prefix}${fmt(sup2)}</span></div>`:''}
+        ${!res1&&!sup1?'<div style="font-size:12px;color:var(--muted);padding:4px 0">لا توجد مستويات واضحة</div>':''}
+      </div>
+    </div>
+
+    <div style="padding:0 16px 12px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">نماذج الشموع الأخيرة</div>
+      ${patHtml}
+    </div>
+
+    <div style="padding:0 16px 12px">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">تنبيهات الحجم</div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px">${vsHtml}</div>
+    </div>
+
+    <div style="margin:0 16px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 13px;font-size:11px;color:var(--muted);line-height:1.7">
+      ⚠️ الذكاء الاصطناعي مساعد تحليلي — ليس توصية مالية
+    </div>
+  `;
+  setTimeout(() => buildAIChart(d), 60);
+}
+
+function buildAIChart(d) {
+  if (window._aiChart) { window._aiChart.destroy(); window._aiChart = null; }
+  const ctx = document.getElementById('aiChart');
+  if (!ctx) return;
+  const labels  = d.chart_times || [];
+  const closes  = d.close_series || [];
+  const bbSer   = d.bb_series   || [];
+  const uppers  = bbSer.map(b => b?.upper  ?? null);
+  const middles = bbSer.map(b => b?.middle ?? null);
+  const lowers  = bbSer.map(b => b?.lower  ?? null);
+  window._aiChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label:'السعر', data:closes,  borderColor:'#58a6ff', borderWidth:2, pointRadius:0, tension:.3, fill:false },
+      { label:'BB+',   data:uppers,  borderColor:'rgba(248,81,73,.45)',  borderWidth:1.5, borderDash:[4,3], pointRadius:0, tension:.3, fill:false },
+      { label:'وسط',   data:middles, borderColor:'rgba(255,193,7,.4)',   borderWidth:1,   borderDash:[3,3], pointRadius:0, tension:.3, fill:false },
+      { label:'BB-',   data:lowers,  borderColor:'rgba(63,185,80,.45)',  borderWidth:1.5, borderDash:[4,3], pointRadius:0, tension:.3, fill:false }
+    ]},
+    options: {
+      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      plugins: {
+        legend:{ display:true, labels:{color:'#7d8590',font:{size:9},boxWidth:10,padding:8} },
+        tooltip:{ backgroundColor:'#161b22', borderColor:'#30363d', borderWidth:1,
+          titleColor:'#7d8590', bodyColor:'#e6edf3',
+          callbacks:{ label:c=>`  ${c.dataset.label}: ${fmt(c.raw)}` } }
+      },
+      scales:{
+        x:{ grid:{color:'#21262d'}, ticks:{color:'#7d8590',maxTicksLimit:5,font:{size:9}} },
+        y:{ grid:{color:'#21262d'}, ticks:{color:'#7d8590',font:{size:9},callback:v=>fmt(v)} }
       }
     }
   });
