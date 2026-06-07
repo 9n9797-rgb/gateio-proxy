@@ -310,6 +310,96 @@ app.get("/proxy/pairs", async (req, res) => {
   }
 });
 
+// ===== تحليل الأسهم الأمريكية (Yahoo Finance) =====
+app.get("/proxy/stock/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const range    = ["1mo","3mo","6mo","1y","2y"].includes(req.query.range) ? req.query.range : "3mo";
+  const interval = ["1d","1wk"].includes(req.query.interval) ? req.query.interval : "1d";
+
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
+
+  try {
+    const r = await withTimeout(fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9"
+      }
+    }), 8000);
+
+    const json = await r.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) {
+      const errMsg = json?.chart?.error?.description || "رمز السهم غير موجود";
+      return res.status(200).json({ error: errMsg, symbol });
+    }
+
+    const meta       = result.meta;
+    const timestamps = result.timestamp || [];
+    const q          = result.indicators?.quote?.[0] || {};
+    const closes     = (q.close  || []).map(v => v ?? null);
+    const opens      = (q.open   || []).map(v => v ?? null);
+    const highs      = (q.high   || []).map(v => v ?? null);
+    const lows       = (q.low    || []).map(v => v ?? null);
+    const volumes    = (q.volume || []).map(v => v ?? 0);
+
+    // تنظيف القيم الفارغة (null من Yahoo)
+    const validCloses = closes.filter(Boolean);
+    if (validCloses.length < 5)
+      return res.status(200).json({ error: "بيانات غير كافية", symbol });
+
+    const rsiArr  = calculateRSI(closes.map(v => v ?? 0), 14);
+    const obvArr  = calculateOBV(closes.map(v => v ?? 0), volumes);
+    const ma20Arr = calculateMA(closes.map(v => v ?? 0), 20);
+
+    const last      = closes.length - 1;
+    const lastClose = meta.regularMarketPrice ?? closes[last];
+    const lastRSI   = rsiArr[last]  ?? 50;
+    const lastMA20  = ma20Arr[last] ?? lastClose;
+    const obvTrend  = getOBVTrend(obvArr);
+    const aboveMA   = lastClose > lastMA20;
+
+    let score = 0;
+    if (aboveMA) score++;
+    if (lastRSI >= 35 && lastRSI <= 55) score++;
+    if (obvTrend === "rising") score++;
+
+    const signal   = score >= 2 ? "accumulation" : score === 1 ? "neutral" : "distribution";
+    const change1d = meta.regularMarketChangePercent ??
+      (closes[last] && closes[last-1] ? ((closes[last] - closes[last-1]) / closes[last-1]) * 100 : 0);
+
+    res.json({
+      symbol,
+      name:       meta.longName || meta.shortName || symbol,
+      exchange:   meta.exchangeName || "",
+      currency:   meta.currency || "USD",
+      price:      Math.round(lastClose * 100) / 100,
+      change1d:   Math.round(change1d * 100) / 100,
+      high:       Math.max(...highs.filter(Boolean)),
+      low:        Math.min(...lows.filter(Boolean)),
+      rsi:        Math.round(lastRSI * 10) / 10,
+      obv_trend:  obvTrend,
+      above_ma20: aboveMA,
+      ma20:       Math.round(lastMA20 * 100) / 100,
+      signal,
+      score,
+      candles: timestamps.map((t, i) => ({
+        time:   t * 1000,
+        open:   opens[i],
+        high:   highs[i],
+        low:    lows[i],
+        close:  closes[i],
+        volume: volumes[i],
+        rsi:    rsiArr[i]  ?? null,
+        ma20:   ma20Arr[i] ?? null,
+        obv:    obvArr[i]  ?? 0
+      }))
+    });
+  } catch (e) {
+    res.status(200).json(upstreamError(e, { symbol }));
+  }
+});
+
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));
