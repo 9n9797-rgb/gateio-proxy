@@ -785,7 +785,7 @@ function calcBreakoutScore(ai) {
 
   // Bullish candle pattern
   const bullPats = patterns.filter(p => p.bullish === true);
-  if (bullPats.length > 0) { score += 8; reasons.push(`نمط ${bullPats[0].name} — شمعة انعكاس إيجابي`); }
+  if (bullPats.length > 0) { score += 8; reasons.push(`${bullPats[0].label} — شمعة انعكاس إيجابي`); }
 
   // MA alignment
   if      (ma.above_20 && ma.bullish_cross) { score += 5; reasons.push('MA20 فوق MA50 وسعر فوق المتوسطات'); }
