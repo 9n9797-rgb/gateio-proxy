@@ -117,6 +117,23 @@
   /* Disclaimer */
   .disclaimer{margin:12px 16px 0;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:11px 13px;font-size:11px;color:var(--muted);line-height:1.6}
 
+  /* === Beginner guide === */
+  .guide-block{margin:12px 16px 0;border-radius:12px;border:1px solid var(--border);overflow:hidden}
+  .guide-header{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:var(--card2);cursor:pointer;user-select:none}
+  .guide-header-left{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+  .guide-header-icon{font-size:16px}
+  .guide-toggle{font-size:11px;color:var(--muted)}
+  .guide-body{display:none;padding:12px 14px;background:var(--card);border-top:1px solid var(--border)}
+  .guide-body.open{display:block}
+  .guide-item{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+  .guide-item:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+  .guide-item-title{font-size:12px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+  .guide-item-body{font-size:12px;color:var(--muted);line-height:1.7}
+  .guide-item-body b{color:var(--text);font-weight:600}
+  .guide-rec-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+  .guide-rec-cell{border-radius:8px;padding:7px 9px;font-size:11px;line-height:1.5}
+  .guide-rec-cell b{display:block;font-size:12px;margin-bottom:2px}
+
   /* === Recommendation tab === */
   .rec-badge{text-align:center;padding:20px 16px 14px}
   .rec-pill{display:inline-block;font-size:22px;font-weight:700;border-radius:12px;padding:10px 28px;margin-bottom:8px}
@@ -531,6 +548,65 @@ function renderAnalysis(d) {
       </div>
     </div>
     <div class="disclaimer">⚠️ هذه الأداة تعليمية — قرار الاستثمار مسؤوليتك الشخصية</div>
+    <div class="guide-block">
+      <div class="guide-header" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.guide-toggle').textContent=this.nextElementSibling.classList.contains('open')?'▲':'▼'">
+        <div class="guide-header-left"><span class="guide-header-icon">🎓</span> شرح المؤشرات — للمبتدئين</div>
+        <span class="guide-toggle">▼</span>
+      </div>
+      <div class="guide-body">
+        <div class="guide-item">
+          <div class="guide-item-title" style="color:var(--blue)">📈 RSI — مؤشر القوة النسبية</div>
+          <div class="guide-item-body">
+            يقيس <b>مدى تشبع السهم بالشراء أو البيع</b> على مقياس 0-100.<br><br>
+            <b style="color:var(--red)">أقل من 30:</b> تشبع بيعي — السهم مبيع كثيراً، قد يرتد للأعلى<br>
+            <b style="color:var(--green)">35 - 55:</b> النطاق المثالي للتجميع الصحي ✅<br>
+            <b style="color:var(--yellow)">55 - 70:</b> سعر مرتفع لكن مقبول — تحقق من مؤشرات أخرى<br>
+            <b style="color:var(--red)">أكثر من 70:</b> تشبع شرائي — خطر انخفاض وشيك ⚠️
+          </div>
+        </div>
+        <div class="guide-item">
+          <div class="guide-item-title" style="color:var(--yellow)">📦 OBV — حجم التراكم</div>
+          <div class="guide-item-body">
+            يتابع <b>من يشتري من وراء الكواليس</b>. المؤسسات الكبيرة تشتري بهدوء دون أن يتحرك السعر كثيراً.<br><br>
+            <b style="color:var(--green)">صاعد:</b> أموال كبيرة تدخل السهم — إشارة تجميع مؤسسي ✅<br>
+            <b style="color:var(--red)">هابط:</b> أموال تخرج من السهم رغم ثبات السعر — تحذير ⚠️<br>
+            <b>محايد:</b> لا اتجاه واضح بعد
+          </div>
+        </div>
+        <div class="guide-item">
+          <div class="guide-item-title" style="color:var(--green)">〰️ MA20 — المتوسط المتحرك 20 يوم</div>
+          <div class="guide-item-body">
+            هو <b>متوسط سعر السهم خلال آخر 20 يوم تداول</b>. يستخدم كخط دعم/مقاومة.<br><br>
+            <b style="color:var(--green)">السعر فوق MA20:</b> اتجاه صعودي صحي — القوة في صف المشتري ✅<br>
+            <b style="color:var(--red)">السعر تحت MA20:</b> ضعف، المتوسط يضغط للأسفل كمقاومة<br><br>
+            <b>نصيحة:</b> ابحث عن السهم الذي يلتصق بـ MA20 من الأعلى بعد اختراق — هذه نقطة دخول قوية.
+          </div>
+        </div>
+        <div class="guide-item">
+          <div class="guide-item-title">🚦 متى أدخل وكيف؟</div>
+          <div class="guide-item-body">
+            <div class="guide-rec-grid">
+              <div class="guide-rec-cell" style="background:#0d2a14;border:1px solid #238636">
+                <b style="color:var(--green)">✅ دخول آمن</b>
+                RSI بين 35-55 + OBV صاعد + السعر فوق MA20
+              </div>
+              <div class="guide-rec-cell" style="background:#2a0d0d;border:1px solid #8c1a1a">
+                <b style="color:var(--red)">❌ تجنب</b>
+                RSI فوق 70 + OBV هابط + السعر تحت MA20
+              </div>
+              <div class="guide-rec-cell" style="background:#1a1a2e;border:1px solid #30363d">
+                <b>💰 حجم الدخول</b>
+                لا تضع أكثر من 10-15% من محفظتك في سهم واحد
+              </div>
+              <div class="guide-rec-cell" style="background:#2a1f0a;border:1px solid #7a5400">
+                <b style="color:var(--yellow)">⚖️ القاعدة الذهبية</b>
+                دائماً حدد وقف خسارة قبل الدخول
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   `;
   buildChart(d, 'price');
 }
@@ -643,8 +719,65 @@ function renderRecommend(d) {
         <div class="risk-chip-val" style="color:${d.upside_pct>0?'var(--green)':'var(--muted)'}">${d.upside_pct>0?'+'+d.upside_pct+'%':'—'}</div>
       </div>
     </div>
+    ${reasonHtml(d.analysis_reason)}
     <div class="disclaimer">⚠️ التوصيات آلية فقط — لا تُعد نصيحة مالية</div>
+    ${guideRec(d.recommendation)}
   `;
+}
+
+function reasonHtml(reasons) {
+  if (!reasons || reasons.length === 0) return '';
+  const items = reasons.map((r, i) => {
+    const isLast = i === reasons.length - 1;
+    return `<div style="padding:8px 0;${isLast?'':'border-bottom:1px solid var(--border)'};font-size:12px;line-height:1.7;color:${isLast?'var(--text)':'var(--muted)'};font-weight:${isLast?'600':'400'}">${r}</div>`;
+  }).join('');
+  return `
+  <div class="guide-block" style="margin-top:10px">
+    <div class="guide-header" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.guide-toggle').textContent=this.nextElementSibling.classList.contains('open')?'▲':'▼'">
+      <div class="guide-header-left"><span class="guide-header-icon">🔍</span> لماذا هذه التوصية؟ — الأسباب بالتفصيل</div>
+      <span class="guide-toggle">▼</span>
+    </div>
+    <div class="guide-body open">${items}</div>
+  </div>`;
+}
+
+function guideRec(rec) {
+  const recGuide = {
+    STRONG_BUY:  { color:'#0d2a14', border:'#238636', text:'المؤشرات كلها إيجابية — يمكن تخصيص 50-70% من المبلغ المحدد للسهم. ادخل على 3 مراحل (ثلث ثلث ثلث) لتقليل مخاطر التوقيت.' },
+    BUY:         { color:'#0d2a14', border:'#238636', text:'إشارات جيدة — ابدأ بـ 30-40% من المبلغ المخصص، واحتفظ بالباقي لإضافة عند أي تراجع. لا تدخل بكامل المبلغ دفعة واحدة.' },
+    HOLD:        { color:'#2a1f0a', border:'#7a5400', text:'إذا عندك مركز مفتوح: لا تبيع. إذا لم تدخل: انتظر. السهم في منطقة غير حاسمة ولا يوجد سبب للاستعجال.' },
+    WATCH:       { color:'#1a1a2e', border:'#30363d', text:'لا تدخل الآن. راقب السهم وانتظر كسر مستوى أو إشارة أوضح. ضع السهم في قائمة المراقبة وتابعه يومياً.' },
+    SELL:        { color:'#2a1000', border:'#7a3a00', text:'إذا عندك مركز: قلصه تدريجياً. ضع حد خسارة واضح. لا تضف مراكز جديدة في هذا الوقت.' },
+    STRONG_SELL: { color:'#2a0d0d', border:'#8c1a1a', text:'إشارات سلبية متعددة. تجنب الدخول تماماً. إذا عندك مركز: أغلقه مع قبول الخسارة الصغيرة أفضل من الخسارة الكبيرة.' }
+  };
+  const g = recGuide[rec] || recGuide.WATCH;
+  return `
+  <div class="guide-block" style="margin-top:12px">
+    <div class="guide-header" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.guide-toggle').textContent=this.nextElementSibling.classList.contains('open')?'▲':'▼'">
+      <div class="guide-header-left"><span class="guide-header-icon">🎓</span> شرح للمبتدئ — ماذا أفعل؟</div>
+      <span class="guide-toggle">▼</span>
+    </div>
+    <div class="guide-body">
+      <div class="guide-item" style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+        <div style="background:${g.color};border:1px solid ${g.border};border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.7;color:var(--text)">${g.text}</div>
+      </div>
+      <div class="guide-item">
+        <div class="guide-item-title">📊 ماذا تعني الدرجات الثلاث؟</div>
+        <div class="guide-item-body">
+          <b>التقني:</b> يحلل سعر السهم وحجم التداول (RSI + OBV + MA). إذا كانت إيجابية معناها السهم في مرحلة تجميع صحية.<br><br>
+          <b>الكونغرس:</b> يتابع صفقات أعضاء الكونغرس الأمريكي. عندما يشترون قبل إعلانات مهمة — هذا مؤشر قوي جداً.<br><br>
+          <b>الأخبار:</b> يحلل مشاعر آخر الأخبار. أخبار إيجابية = نقاط موجبة، سلبية = نقاط سالبة.
+        </div>
+      </div>
+      <div class="guide-item" style="margin-top:10px">
+        <div class="guide-item-title">⚖️ وقف الخسارة والهدف — لماذا مهم؟</div>
+        <div class="guide-item-body">
+          <b>الهدف:</b> السعر الذي تبيع عنده لتحقيق الربح — لا تنتظر أكثر منه فتخسر الفرصة.<br><br>
+          <b>وقف الخسارة:</b> إذا وصل السهم لهذا السعر — بع فوراً بدون تردد. الخسارة الصغيرة المحسوبة أفضل من الخسارة الكبيرة.
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 
 // ============================================================
@@ -679,6 +812,22 @@ function renderCongress(d) {
       <div class="cong-stat"><div class="cong-stat-val" style="color:var(--green)">${d.buys}</div><div class="cong-stat-label">شراء</div></div>
       <div class="cong-stat"><div class="cong-stat-val" style="color:var(--red)">${d.sells}</div><div class="cong-stat-label">بيع</div></div>
       <div class="cong-stat"><div class="cong-stat-val">${d.total}</div><div class="cong-stat-label">إجمالي</div></div>
+    </div>
+    <div class="guide-block" style="margin:10px 16px 0">
+      <div class="guide-header" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.guide-toggle').textContent=this.nextElementSibling.classList.contains('open')?'▲':'▼'">
+        <div class="guide-header-left"><span class="guide-header-icon">🎓</span> ماذا يعني تداول الكونغرس؟</div>
+        <span class="guide-toggle">▼</span>
+      </div>
+      <div class="guide-body">
+        <div class="guide-item">
+          <div class="guide-item-body">
+            أعضاء الكونغرس <b>ملزمون قانونياً</b> بالإفصاح عن صفقاتهم خلال 45 يوماً.<br><br>
+            <b style="color:var(--green)">لماذا الشراء مهم جداً؟</b> الكونغرس يطّلع على تشريعات ومعلومات قبل إعلانها للعموم. عندما يشترون — غالباً يتوقعون أخباراً إيجابية.<br><br>
+            <b style="color:var(--yellow)">والبيع؟</b> لا يعني بالضرورة خبراً سيئاً — قد يحتاجون سيولة أو يتنوعون. لكن البيع الجماعي (عدة أعضاء) يستحق الانتباه.<br><br>
+            <b>الإشارة القوية:</b> عندما يشتري أكثر من 3 أعضاء نفس السهم خلال أسبوع واحد.
+          </div>
+        </div>
+      </div>
     </div>
     <div class="cong-list">${items}</div>`;
 }

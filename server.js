@@ -203,8 +203,75 @@ function buildRecommendation(analysis, congress, news) {
       congress:  { value: Math.round(cong * 10) / 10,      label: congress.total === 0 ? 'لا بيانات' : congress.buys > congress.sells ? `شراء (${congress.buys})` : `بيع (${congress.sells})` },
       news:      { value: Math.round(newsScore * 10) / 10, label: newsScore > 0.5 ? 'إيجابي' : newsScore < -0.5 ? 'سلبي' : 'محايد' }
     },
-    daily_tip: tips[rec] || tips.WATCH
+    daily_tip: tips[rec] || tips.WATCH,
+    analysis_reason: buildReason({ rsi, obv_trend, above_ma20, price, high, low }, congress, news, rec, upsidePct, timeFrame)
   };
+}
+
+function buildReason(analysis, congress, news, rec, upsidePct, timeFrame) {
+  const parts = [];
+  const { rsi, obv_trend, above_ma20 } = analysis;
+
+  // --- RSI ---
+  if (rsi >= 35 && rsi <= 55)
+    parts.push(`🔵 RSI عند ${rsi} — في نطاق التجميع المثالي (35-55)، مما يشير إلى أن السهم لم يصل تشبعاً شرائياً بعد وهناك مجال للصعود`);
+  else if (rsi < 30)
+    parts.push(`🟢 RSI عند ${rsi} — في منطقة تشبع بيعي حاد، هذا يعني أن السهم مبيع بشكل مبالغ فيه وقد يرتد للأعلى قريباً`);
+  else if (rsi > 70)
+    parts.push(`🔴 RSI عند ${rsi} — في منطقة تشبع شرائي، السعر ارتفع بسرعة كبيرة وقد يشهد تصحيحاً`);
+  else if (rsi > 55)
+    parts.push(`🟡 RSI عند ${rsi} — فوق منطقة التجميع المثالية، السهم في حالة شراء لكن لم يصل التشبع الكامل بعد`);
+
+  // --- OBV ---
+  if (obv_trend === 'rising')
+    parts.push(`📦 حجم التراكم (OBV) صاعد — هذا يعني أن المؤسسات والمستثمرين الكبار يشترون بهدوء في الخفاء بكميات متزايدة`);
+  else if (obv_trend === 'falling')
+    parts.push(`📉 حجم التراكم (OBV) هابط — خروج أموال مؤسسية من السهم، حتى لو بدا السعر ثابتاً هذا مؤشر تحذيري`);
+
+  // --- MA20 ---
+  if (above_ma20)
+    parts.push(`📈 السعر فوق المتوسط المتحرك 20 يوم — الاتجاه الأساسي صعودي، المتوسط يعمل كدعم تحت السعر`);
+  else
+    parts.push(`📉 السعر تحت المتوسط المتحرك 20 يوم — المتوسط يعمل كمقاومة فوق السعر الحالي`);
+
+  // --- Congress ---
+  if (congress.total > 0) {
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const thisWeek = congress.trades.filter(t => t.date >= weekAgo);
+    const weekBuys = thisWeek.filter(t => t.type === 'purchase').length;
+    const weekSells = thisWeek.filter(t => t.type === 'sale').length;
+
+    if (weekBuys > 0)
+      parts.push(`🏛️ هذا الأسبوع: ${weekBuys} عضو من الكونغرس/مجلس الشيوخ اشترى السهم — إشارة مؤسسية قوية جداً`);
+    else if (congress.buys > 0)
+      parts.push(`🏛️ خلال آخر 90 يوم: ${congress.buys} عملية شراء من الكونغرس${congress.sells > 0 ? ` و${congress.sells} عملية بيع` : ''}`);
+
+    if (congress.buys > congress.sells && congress.buys >= 3)
+      parts.push(`💡 إجماع كونغرسي: ${congress.buys} عملية شراء مقابل ${congress.sells} بيع — هذا مستوى ثقة مرتفع جداً من المطّلعين`);
+  } else {
+    parts.push(`🏛️ لا توجد بيانات تداول كونغرس حديثة لهذا السهم في آخر 90 يوماً`);
+  }
+
+  // --- News ---
+  const posNews = news.filter(n => n.sentiment > 0);
+  const negNews = news.filter(n => n.sentiment < 0);
+  if (posNews.length > 0)
+    parts.push(`📰 ${posNews.length} خبر إيجابي حديث${posNews[0]?.title ? `: "${posNews[0].title.slice(0,60)}..."` : ''}`);
+  if (negNews.length > 0)
+    parts.push(`⚠️ ${negNews.length} خبر سلبي يستحق المتابعة`);
+
+  // --- Summary sentence ---
+  const summaries = {
+    STRONG_BUY:  `✅ خلاصة: تزامن ${parts.length} عوامل إيجابية في نفس الوقت — هذه الحالة نادرة وتمثل فرصة دخول قوية. الهدف +${upsidePct}% خلال ${timeFrame}.`,
+    BUY:         `✅ خلاصة: أغلب المؤشرات إيجابية مع بعض التحفظ. الهدف +${upsidePct}% خلال ${timeFrame}، لكن ادخل بتدرج.`,
+    HOLD:        `⏳ خلاصة: المؤشرات متوازنة ولا يوجد محفز واضح للدخول أو الخروج الآن. انتظر تأكيداً أوضح.`,
+    WATCH:       `👀 خلاصة: المؤشرات متضاربة. راقب السهم وانتظر تحرك السعر فوق مستوى محوري قبل الدخول.`,
+    SELL:        `⚠️ خلاصة: عوامل سلبية تتراكم. قلّص التعرض وانتظر انتهاء ضغط البيع.`,
+    STRONG_SELL: `❌ خلاصة: معظم المؤشرات سلبية. تجنب الدخول حتى تتحسن الصورة بشكل واضح.`
+  };
+
+  parts.push(summaries[rec] || summaries.WATCH);
+  return parts;
 }
 
 // ===== الجذر (مؤشر) =====
