@@ -167,6 +167,149 @@ app.get("/llm-instructions", (req, res) => {
   res.status(404).json({ error: "llm-instructions.md not found" });
 });
 
+// ===== حسابات المؤشرات الفنية =====
+function calculateRSI(closes, period = 14) {
+  if (closes.length < period + 1) return closes.map(() => 50);
+  const result = new Array(period).fill(null);
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) gains += d; else losses += Math.abs(d);
+  }
+  let avgGain = gains / period, avgLoss = losses / period;
+  result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
+    result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+  }
+  return result;
+}
+
+function calculateOBV(closes, volumes) {
+  const obv = [0];
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i] > closes[i - 1]) obv.push(obv[i - 1] + volumes[i]);
+    else if (closes[i] < closes[i - 1]) obv.push(obv[i - 1] - volumes[i]);
+    else obv.push(obv[i - 1]);
+  }
+  return obv;
+}
+
+function getOBVTrend(obv) {
+  if (obv.length < 10) return "neutral";
+  const n = obv.length;
+  const recent = obv.slice(n - 5).reduce((a, b) => a + b, 0) / 5;
+  const older  = obv.slice(n - 10, n - 5).reduce((a, b) => a + b, 0) / 5;
+  if (recent > older * 1.005) return "rising";
+  if (recent < older * 0.995) return "falling";
+  return "neutral";
+}
+
+function calculateMA(closes, period = 20) {
+  return closes.map((_, i) => {
+    if (i < period - 1) return null;
+    return closes.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
+  });
+}
+
+// ===== تحليل التجميع =====
+app.get("/proxy/analyze/:pair", async (req, res) => {
+  const pair = req.params.pair.toUpperCase();
+  const limit = Math.min(parseInt(req.query.limit) || 60, 200);
+  const interval = req.query.interval || "1d";
+  const url = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=${interval}&limit=${limit}`;
+
+  try {
+    const r = await withTimeout(fetch(url), 8000);
+    if (!r.ok) {
+      const txt = await r.text();
+      return res.status(200).json({ error: `Gate.io ${r.status}: ${txt}`, pair });
+    }
+    const raw = await r.json();
+    if (!Array.isArray(raw) || raw.length < 5)
+      return res.status(200).json({ error: "بيانات غير كافية", pair });
+
+    // [time, vol, close, high, low, open, closed]
+    const closes  = raw.map(c => parseFloat(c[2]));
+    const highs   = raw.map(c => parseFloat(c[3]));
+    const lows    = raw.map(c => parseFloat(c[4]));
+    const opens   = raw.map(c => parseFloat(c[5]));
+    const volumes = raw.map(c => parseFloat(c[1]));
+    const times   = raw.map(c => parseInt(c[0]) * 1000);
+
+    const rsiArr  = calculateRSI(closes, 14);
+    const obvArr  = calculateOBV(closes, volumes);
+    const ma20Arr = calculateMA(closes, 20);
+
+    const last     = closes.length - 1;
+    const lastRSI  = rsiArr[last]  ?? 50;
+    const lastMA20 = ma20Arr[last] ?? closes[last];
+    const lastClose = closes[last];
+    const obvTrend  = getOBVTrend(obvArr);
+    const aboveMA   = lastClose > lastMA20;
+
+    // درجة التجميع
+    let score = 0;
+    if (aboveMA) score++;
+    if (lastRSI >= 35 && lastRSI <= 55) score++;
+    if (obvTrend === "rising") score++;
+
+    const signal = score >= 2 ? "accumulation" : score === 1 ? "neutral" : "distribution";
+
+    // أعلى/أدنى سعر خلال الفترة
+    const highPeriod = Math.max(...highs);
+    const lowPeriod  = Math.min(...lows);
+    const change24h  = closes.length >= 2
+      ? ((closes[last] - closes[last - 1]) / closes[last - 1]) * 100 : 0;
+
+    res.json({
+      pair,
+      interval,
+      price:     lastClose,
+      change24h: Math.round(change24h * 100) / 100,
+      high:      highPeriod,
+      low:       lowPeriod,
+      rsi:       Math.round(lastRSI * 10) / 10,
+      obv_trend: obvTrend,
+      above_ma20: aboveMA,
+      ma20:      Math.round(lastMA20 * 100) / 100,
+      signal,
+      score,
+      candles: raw.map((_, i) => ({
+        time:   times[i],
+        open:   opens[i],
+        high:   highs[i],
+        low:    lows[i],
+        close:  closes[i],
+        volume: volumes[i],
+        rsi:    rsiArr[i]  ?? null,
+        ma20:   ma20Arr[i] ?? null,
+        obv:    obvArr[i]  ?? 0
+      }))
+    });
+  } catch (e) {
+    res.status(200).json(upstreamError(e, { pair }));
+  }
+});
+
+// ===== قائمة أزواج Gate.io الشائعة =====
+app.get("/proxy/pairs", async (req, res) => {
+  const url = "https://api.gateio.ws/api/v4/spot/currency_pairs";
+  try {
+    const r = await withTimeout(fetch(url), 6000);
+    const all = await r.json();
+    const popular = all
+      .filter(p => p.quote === "USDT" && p.trade_status === "tradable")
+      .slice(0, 100)
+      .map(p => ({ id: p.id, base: p.base, quote: p.quote }));
+    res.json(popular);
+  } catch (e) {
+    res.status(200).json(upstreamError(e));
+  }
+});
+
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));

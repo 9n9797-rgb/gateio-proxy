@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Accumulation Detector — Gate.io</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0d1117;--card:#161b22;--card2:#1c2128;--border:#30363d;
+    --text:#e6edf3;--muted:#7d8590;--green:#3fb950;--red:#f85149;
+    --yellow:#d29922;--blue:#58a6ff;--purple:#8b949e;
+    --accent:#238636;--accent2:#1a7f37;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;max-width:480px;margin:0 auto;padding:0 0 40px}
+
+  /* Header */
+  .header{display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
+  .header h1{font-size:17px;font-weight:600;letter-spacing:-.3px}
+  .btn-icon{background:var(--card);border:1px solid var(--border);color:var(--text);width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;transition:.15s}
+  .btn-icon:hover{background:var(--card2)}
+
+  /* Search bar */
+  .search-bar{display:flex;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .search-bar input{flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-size:15px;outline:none;direction:ltr;text-transform:uppercase}
+  .search-bar input:focus{border-color:var(--blue)}
+  .search-bar input::placeholder{color:var(--muted);text-transform:none}
+  .search-bar button{background:var(--blue);color:#000;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.15s}
+  .search-bar button:hover{opacity:.88}
+  .search-bar button:disabled{opacity:.5;cursor:not-allowed}
+
+  /* Chip tabs */
+  .chips{display:flex;gap:8px;padding:12px 16px;overflow-x:auto;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:13px;cursor:pointer;transition:.15s;direction:ltr}
+  .chip:hover,.chip.active{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+
+  /* Loading / Error */
+  .state{text-align:center;padding:60px 16px;color:var(--muted);font-size:15px}
+  .spinner{display:inline-block;width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Price block */
+  .price-block{padding:18px 16px 10px;border-bottom:1px solid var(--border)}
+  .pair-name{font-size:22px;font-weight:700;letter-spacing:.5px;direction:ltr}
+  .price-row{display:flex;align-items:baseline;gap:10px;margin-top:4px}
+  .price-main{font-size:32px;font-weight:700;letter-spacing:-1px;direction:ltr}
+  .price-change{font-size:14px;font-weight:600;border-radius:6px;padding:2px 8px}
+  .price-change.up{color:var(--green);background:#1a3a1a}
+  .price-change.down{color:var(--red);background:#3a1a1a}
+  .price-range{font-size:12px;color:var(--muted);margin-top:4px;direction:ltr}
+
+  /* Signal banner */
+  .signal-banner{margin:14px 16px 0;border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;font-size:15px;font-weight:600}
+  .signal-banner.accumulation{background:#0d2a14;border:1px solid #238636}
+  .signal-banner.neutral{background:#2a1f0a;border:1px solid #7a5400}
+  .signal-banner.distribution{background:#2a0d0d;border:1px solid #8c1a1a}
+  .signal-icon{font-size:26px;flex-shrink:0}
+  .signal-text small{display:block;font-weight:400;font-size:12px;color:var(--muted);margin-top:2px}
+
+  /* Metric cards */
+  .cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:14px 16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center}
+  .card-label{font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:500}
+  .card-value{font-size:22px;font-weight:700}
+  .card-sub{font-size:11px;margin-top:3px;color:var(--muted)}
+  .card-badge{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:600;border-radius:6px;padding:3px 8px;margin-top:4px}
+  .badge-green{color:var(--green);background:#0d2a14}
+  .badge-red{color:var(--red);background:#2a0d0d}
+  .badge-yellow{color:var(--yellow);background:#2a1a0a}
+
+  /* Chart */
+  .chart-section{padding:10px 16px}
+  .chart-tabs{display:flex;gap:6px;margin-bottom:10px;justify-content:flex-end}
+  .chart-tab{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;transition:.15s;direction:ltr}
+  .chart-tab.active{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+  .chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;position:relative;height:220px}
+  canvas{max-width:100%}
+
+  /* Indicator details */
+  .indicator-section{padding:10px 16px}
+  .ind-title{font-size:13px;font-weight:600;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px}
+  .ind-row{display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px}
+  .ind-name{font-size:14px;font-weight:500}
+  .ind-desc{font-size:11px;color:var(--muted);margin-top:2px}
+  .ind-val{text-align:left;font-size:13px;direction:ltr}
+  .bar-wrap{width:90px;height:6px;background:var(--border);border-radius:3px;margin-top:4px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:3px;transition:.5s}
+
+  /* Disclaimer */
+  .disclaimer{margin:14px 16px 0;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:11px;color:var(--muted);line-height:1.6}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="btn-icon" onclick="resetView()">✕</span>
+  <h1>accumulation-detector</h1>
+  <span class="btn-icon">⋯</span>
+</div>
+
+<div class="search-bar">
+  <input id="pairInput" type="text" placeholder="مثال: BTC_USDT" value="BTC_USDT"
+    onkeydown="if(event.key==='Enter')analyze()">
+  <button id="analyzeBtn" onclick="analyze()">تحليل</button>
+</div>
+
+<div class="chips" id="quickChips">
+  <span class="chip active" onclick="quickPair(this,'BTC_USDT')">BTC</span>
+  <span class="chip" onclick="quickPair(this,'ETH_USDT')">ETH</span>
+  <span class="chip" onclick="quickPair(this,'SOL_USDT')">SOL</span>
+  <span class="chip" onclick="quickPair(this,'BNB_USDT')">BNB</span>
+  <span class="chip" onclick="quickPair(this,'XRP_USDT')">XRP</span>
+  <span class="chip" onclick="quickPair(this,'DOGE_USDT')">DOGE</span>
+  <span class="chip" onclick="quickPair(this,'AVAX_USDT')">AVAX</span>
+  <span class="chip" onclick="quickPair(this,'ADA_USDT')">ADA</span>
+</div>
+
+<div id="mainContent">
+  <div class="state">
+    <div>ابحث عن زوج عملات لبدء التحليل</div>
+  </div>
+</div>
+
+<script>
+let chartInst = null;
+let currentMode = 'price';
+let lastData = null;
+
+function quickPair(el, pair) {
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('pairInput').value = pair;
+  analyze();
+}
+
+function resetView() {
+  document.getElementById('pairInput').value = '';
+  document.getElementById('mainContent').innerHTML =
+    '<div class="state"><div>ابحث عن زوج عملات لبدء التحليل</div></div>';
+  lastData = null;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+}
+
+async function analyze() {
+  const pair = document.getElementById('pairInput').value.trim().toUpperCase().replace('/','_');
+  if (!pair) return;
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  document.getElementById('mainContent').innerHTML =
+    '<div class="state"><div class="spinner"></div><div>جاري التحليل…</div></div>';
+
+  try {
+    const res = await fetch(`/proxy/analyze/${pair}?limit=60&interval=1d`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    lastData = data;
+    renderResult(data);
+  } catch(e) {
+    document.getElementById('mainContent').innerHTML =
+      `<div class="state">❌<br><br>${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'تحليل';
+  }
+}
+
+function renderResult(d) {
+  const signalInfo = {
+    accumulation: { icon:'✅', label:'التجميع نشط', desc:'المستثمرون الكبار يجمعون — ننصح بالدخول على مراحل (DCA)', cls:'accumulation' },
+    neutral:      { icon:'⚠️', label:'إشارة محايدة', desc:'لا يوجد اتجاه واضح حتى الآن', cls:'neutral' },
+    distribution: { icon:'❌', label:'توزيع جارٍ', desc:'ضغط بيع ملحوظ — احذر', cls:'distribution' }
+  };
+  const s = signalInfo[d.signal] || signalInfo.neutral;
+
+  const changeClass = d.change24h >= 0 ? 'up' : 'down';
+  const changeSign  = d.change24h >= 0 ? '+' : '';
+
+  // RSI card color
+  const rsiColor = d.rsi < 35 ? 'badge-red' : d.rsi > 65 ? 'badge-yellow' : 'badge-green';
+  const rsiLabel = d.rsi < 35 ? 'تشبع بيعي' : d.rsi > 65 ? 'تشبع شرائي' : 'نطاق التجميع';
+  const rsiPct   = Math.round(d.rsi);
+
+  // OBV card
+  const obvColor = d.obv_trend === 'rising' ? 'badge-green' : d.obv_trend === 'falling' ? 'badge-red' : 'badge-yellow';
+  const obvLabel = d.obv_trend === 'rising' ? 'صاعد' : d.obv_trend === 'falling' ? 'هابط' : 'محايد';
+  const obvIcon  = d.obv_trend === 'rising' ? '↑' : d.obv_trend === 'falling' ? '↓' : '→';
+
+  // MA card
+  const maColor = d.above_ma20 ? 'badge-green' : 'badge-red';
+  const maLabel = d.above_ma20 ? 'فوق MA20' : 'تحت MA20';
+
+  document.getElementById('mainContent').innerHTML = `
+
+    <div class="price-block">
+      <div class="pair-name">${d.pair}</div>
+      <div class="price-row">
+        <span class="price-main">$${formatNum(d.price)}</span>
+        <span class="price-change ${changeClass}">${changeSign}${d.change24h}%</span>
+      </div>
+      <div class="price-range">أعلى: $${formatNum(d.high)} &nbsp;|&nbsp; أدنى: $${formatNum(d.low)}</div>
+    </div>
+
+    <div class="signal-banner ${s.cls}">
+      <span class="signal-icon">${s.icon}</span>
+      <div>
+        <div>${s.label}</div>
+        <small>${s.desc}</small>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-label">RSI — قوة السهم</div>
+        <div class="card-value">${d.rsi}</div>
+        <div class="card-badge ${rsiColor}">${rsiLabel}</div>
+        <div class="card-sub">ساعد ≥ 35-55 = نطاق ثالثة</div>
+      </div>
+      <div class="card">
+        <div class="card-label">OBV — حجم التراكم</div>
+        <div class="card-value card-badge ${obvColor}" style="margin:0 auto;display:inline-flex">${obvIcon} ${obvLabel}</div>
+        <div class="card-sub" style="margin-top:8px">صاعد: المال يدخل السهم</div>
+      </div>
+      <div class="card">
+        <div class="card-label">السعر فوق MA20</div>
+        <div class="card-badge ${maColor}" style="font-size:17px;margin-top:6px">${d.above_ma20 ? '✓ نعم' : '✗ لا'}</div>
+        <div class="card-sub" style="margin-top:6px">MA20 = $${formatNum(d.ma20)}</div>
+      </div>
+    </div>
+
+    <div class="chart-section">
+      <div class="chart-tabs">
+        <span class="chart-tab" onclick="switchMode('volume',this)">الحجم 📊</span>
+        <span class="chart-tab" onclick="switchMode('rsi',this)">RSI</span>
+        <span class="chart-tab active" onclick="switchMode('price',this)">السعر ✏️</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="mainChart"></canvas>
+      </div>
+    </div>
+
+    <div class="indicator-section">
+      <div class="ind-title">تفاصيل المؤشرات</div>
+
+      <div class="ind-row">
+        <div>
+          <div class="ind-name">RSI (14)</div>
+          <div class="ind-desc">نطاق 35-55 = تجميع صحي</div>
+          <div class="bar-wrap" style="direction:ltr">
+            <div class="bar-fill" style="width:${rsiPct}%;background:${d.rsi>65?'#d29922':d.rsi<35?'#f85149':'#3fb950'}"></div>
+          </div>
+        </div>
+        <div class="ind-val">
+          <div class="card-badge ${rsiColor}">${d.rsi}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">0 — 100</div>
+        </div>
+      </div>
+
+      <div class="ind-row">
+        <div>
+          <div class="ind-name">On-Balance Volume</div>
+          <div class="ind-desc">مقارنة آخر 5 شمعات بالسابقة</div>
+        </div>
+        <div class="ind-val">
+          <div class="card-badge ${obvColor}">${obvIcon} ${obvLabel}</div>
+        </div>
+      </div>
+
+      <div class="ind-row">
+        <div>
+          <div class="ind-name">المتوسط المتحرك 20</div>
+          <div class="ind-desc">السعر ${d.above_ma20 ? 'فوق' : 'تحت'} المتوسط إيجابي</div>
+        </div>
+        <div class="ind-val">
+          <div class="card-badge ${maColor}">${d.above_ma20 ? '✓ فوق' : '✗ تحت'}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;direction:ltr">$${formatNum(d.ma20)}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      ⚠️ هذه الأداة تعليمية فقط — البيانات المُستخدمة محاكاة • قرار الاستثمار مسؤوليتك الشخصية — استشر متخصصًا ماليًا قبل أي قرار
+    </div>
+  `;
+
+  buildChart(d, 'price');
+}
+
+function switchMode(mode, el) {
+  document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  currentMode = mode;
+  if (lastData) buildChart(lastData, mode);
+}
+
+function buildChart(d, mode) {
+  if (chartInst) { chartInst.destroy(); chartInst = null; }
+  const candles = d.candles.slice(-30);
+  const labels  = candles.map(c => {
+    const dt = new Date(c.time);
+    return `${dt.getMonth()+1}/${dt.getDate()}`;
+  });
+
+  const ctx = document.getElementById('mainChart');
+  if (!ctx) return;
+
+  let dataset, yLabel;
+  if (mode === 'price') {
+    dataset = {
+      label: 'السعر',
+      data: candles.map(c => c.close),
+      borderColor: '#58a6ff',
+      backgroundColor: 'rgba(88,166,255,0.12)',
+      fill: true,
+      tension: .35,
+      pointRadius: 0,
+      borderWidth: 2
+    };
+    const ma = candles.map(c => c.ma20);
+    chartInst = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          dataset,
+          { label:'MA20', data:ma, borderColor:'rgba(255,193,7,.7)', borderWidth:1.5,
+            borderDash:[4,3], pointRadius:0, fill:false, tension:.35 }
+        ]
+      },
+      options: chartOpts('السعر $')
+    });
+  } else if (mode === 'volume') {
+    chartInst = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'الحجم',
+          data: candles.map(c => c.volume),
+          backgroundColor: candles.map((c,i) =>
+            i===0 ? '#58a6ff44' : c.close >= candles[i-1]?.close ? '#3fb95088' : '#f8514988'),
+          borderRadius: 2
+        }]
+      },
+      options: chartOpts('الحجم')
+    });
+  } else if (mode === 'rsi') {
+    const rsiData = candles.map(c => c.rsi);
+    chartInst = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label:'RSI', data:rsiData, borderColor:'#8b949e', borderWidth:2,
+            backgroundColor:'rgba(139,148,158,.1)', fill:true, tension:.3, pointRadius:0 },
+          { label:'70', data:candles.map(()=>70), borderColor:'#f8514955',
+            borderWidth:1, borderDash:[3,3], pointRadius:0, fill:false },
+          { label:'30', data:candles.map(()=>30), borderColor:'#3fb95055',
+            borderWidth:1, borderDash:[3,3], pointRadius:0, fill:false }
+        ]
+      },
+      options: chartOpts('RSI', 0, 100)
+    });
+  }
+}
+
+function chartOpts(label, min, max) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    interaction: { mode:'index', intersect:false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor:'#161b22',
+        borderColor:'#30363d',
+        borderWidth:1,
+        titleColor:'#7d8590',
+        bodyColor:'#e6edf3',
+        callbacks: { label: ctx => ` ${label}: ${formatNum(ctx.raw)}` }
+      }
+    },
+    scales: {
+      x: { grid:{ color:'#21262d' }, ticks:{ color:'#7d8590', maxTicksLimit:6, font:{size:10} } },
+      y: {
+        position:'left',
+        grid:{ color:'#21262d' },
+        ticks:{ color:'#7d8590', font:{size:10}, callback:v=>formatNum(v) },
+        ...(min!=null?{min}:{}),
+        ...(max!=null?{max}:{})
+      }
+    }
+  };
+}
+
+function formatNum(n) {
+  if (n == null) return '—';
+  n = parseFloat(n);
+  if (n >= 1000) return n.toLocaleString('en-US', {maximumFractionDigits:2});
+  if (n >= 1)    return n.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+  return n.toPrecision(4);
+}
+
+// تحميل BTC تلقائياً
+analyze();
+</script>
+</body>
+</html>
