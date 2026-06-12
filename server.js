@@ -44,6 +44,93 @@ const memoGet = (key, fn, ttl) => {
   return fn().then(v => { _cache.set(key, { v, at: Date.now() }); return v; });
 };
 
+// ===== Yahoo Finance Crumb (required for quoteSummary) =====
+let _yahooCrumb = null;
+let _yahooCookies = '';
+let _yahooCrumbAt = 0;
+const CRUMB_TTL = 6 * 3600000;
+
+async function getYahooCrumb() {
+  if (_yahooCrumb && Date.now() - _yahooCrumbAt < CRUMB_TTL) return _yahooCrumb;
+  try {
+    const r1 = await withTimeout(fetch('https://fc.yahoo.com/', {
+      redirect: 'manual',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' }
+    }), 5000).catch(() => null);
+    let cookieStr = '';
+    if (r1) {
+      const rawCookies = typeof r1.headers.getSetCookie === 'function'
+        ? r1.headers.getSetCookie()
+        : [r1.headers.get('set-cookie') || ''];
+      cookieStr = rawCookies.filter(Boolean).map(c => c.split(';')[0]).join('; ');
+    }
+    const r2 = await withTimeout(fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        ...(cookieStr ? { 'Cookie': cookieStr } : {})
+      }
+    }), 5000);
+    const text = await r2.text();
+    if (text && text.length < 50 && !text.includes('{')) {
+      _yahooCrumb = text.trim();
+      _yahooCookies = cookieStr;
+      _yahooCrumbAt = Date.now();
+      return _yahooCrumb;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function fetchYahooQuoteSummary(symbol, modules) {
+  const crumb = await getYahooCrumb();
+  if (!crumb) return null;
+  const moduleStr = Array.isArray(modules) ? modules.join(',') : modules;
+  const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${encodeURIComponent(moduleStr)}&crumb=${encodeURIComponent(crumb)}`;
+  const r = await withTimeout(fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      ...((_yahooCookies) ? { 'Cookie': _yahooCookies } : {})
+    }
+  }), 8000);
+  if (!r.ok) return null;
+  const json = await r.json();
+  return json?.quoteSummary?.result?.[0] || null;
+}
+
+async function fetchAnalystRecs(symbol) {
+  const result = await fetchYahooQuoteSummary(symbol, ['recommendationTrend', 'upgradeDowngradeHistory', 'financialData']);
+  if (!result) return null;
+  const trend = result.recommendationTrend?.trend?.[0] || {};
+  const history = (result.upgradeDowngradeHistory?.history || []).slice(0, 20);
+  const fd = result.financialData || {};
+  const total = (trend.strongBuy||0) + (trend.buy||0) + (trend.hold||0) + (trend.sell||0) + (trend.strongSell||0);
+  const consMap = { strong_buy:'شراء قوي', buy:'شراء', hold:'احتفظ', sell:'بيع', strong_sell:'بيع قوي' };
+  return {
+    total_analysts: total,
+    strong_buy:  trend.strongBuy  || 0,
+    buy:         trend.buy        || 0,
+    hold:        trend.hold       || 0,
+    sell:        trend.sell       || 0,
+    strong_sell: trend.strongSell || 0,
+    consensus:    fd.recommendationKey || 'none',
+    consensus_ar: consMap[fd.recommendationKey] || 'لا توصية',
+    consensus_mean: fd.recommendationMean?.raw ?? null,
+    target_high:   fd.targetHighPrice?.raw   ?? null,
+    target_low:    fd.targetLowPrice?.raw    ?? null,
+    target_mean:   fd.targetMeanPrice?.raw   ?? null,
+    target_median: fd.targetMedianPrice?.raw ?? null,
+    recent_actions: history.map(h => ({
+      firm:         h.firm || '',
+      from:         h.fromGrade || '',
+      to:           h.toGrade || '',
+      action:       h.action || '',
+      price_target: h.currentPriceTarget || null,
+      date:         h.epochGradeDate ? new Date(h.epochGradeDate * 1000).toISOString().split('T')[0] : null
+    }))
+  };
+}
+
 // Sentiment
 const POS_W = ['surge','beat','record','profit','growth','buy','upgrade','strong','bullish','gains','rally','soar','positive','exceed','revenue','innovation'];
 const NEG_W = ['drop','miss','loss','decline','cut','downgrade','weak','bearish','sell','fall','crash','risk','lower','concern','lawsuit','investigation','fraud'];
@@ -1166,25 +1253,42 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
       };
     }
 
-    // Parallel: congress (stocks only) + news
-    const [congressResult, newsResult] = await Promise.allSettled([
+    // Parallel: congress (stocks only) + news + analysts
+    const [congressResult, newsResult, analystsResult] = await Promise.allSettled([
       type === 'stock'
         ? fetchCongressTrades(symbol, 90)
         : Promise.resolve({ trades: [], buys: 0, sells: 0, total: 0 }),
-      memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000)
+      memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000),
+      type === 'stock'
+        ? memoGet(`analysts_${symbol}`, () => fetchAnalystRecs(symbol), 60 * 60000)
+        : Promise.resolve(null)
     ]);
 
-    const congress = congressResult.status === 'fulfilled' ? congressResult.value : { trades: [], buys: 0, sells: 0, total: 0 };
-    const news     = newsResult.status === 'fulfilled' ? newsResult.value : [];
+    const congress  = congressResult.status  === 'fulfilled' ? congressResult.value  : { trades: [], buys: 0, sells: 0, total: 0 };
+    const news      = newsResult.status      === 'fulfilled' ? newsResult.value      : [];
+    const analysts  = analystsResult.status  === 'fulfilled' ? analystsResult.value  : null;
 
     const rec = buildRecommendation(analysis, congress, news);
+
+    const analystsSummary = analysts ? {
+      total_analysts: analysts.total_analysts,
+      consensus:      analysts.consensus,
+      consensus_ar:   analysts.consensus_ar,
+      bullish_pct:    analysts.total_analysts > 0
+        ? Math.round((analysts.strong_buy + analysts.buy) / analysts.total_analysts * 100)
+        : 0,
+      breakdown:      analysts.breakdown,
+      price_targets:  analysts.price_targets,
+      recent_actions: analysts.recent_actions.slice(0, 8)
+    } : null;
 
     res.json({
       date: new Date().toISOString().split('T')[0],
       ...analysis,
       ...rec,
       congress_activity: congress.trades.slice(0, 10),
-      recent_news:       news.slice(0, 6)
+      recent_news:       news.slice(0, 6),
+      analysts:          analystsSummary
     });
   } catch (e) {
     res.json(upstreamError(e, { symbol }));
@@ -1491,6 +1595,47 @@ app.get("/proxy/ai/:symbol", async (req, res) => {
     ai.current_price = Math.round(closes[closes.length - 1] * 100) / 100;
     res.json({ symbol, type, ...ai });
   } catch(e) {
+    res.json(upstreamError(e, { symbol }));
+  }
+});
+
+// ===== توصيات المحللين الوول ستريت =====
+app.get("/proxy/analysts/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  try {
+    const data = await memoGet(`analysts_${symbol}`, () => fetchAnalystRecs(symbol), 60 * 60000);
+    if (!data) return res.json({ symbol, error: 'تعذر جلب بيانات المحللين', available: false });
+
+    const { total_analysts, strong_buy, buy, hold, sell, strong_sell,
+            consensus, consensus_ar, consensus_mean, target_high, target_low,
+            target_mean, target_median, recent_actions } = data;
+
+    const bullish_pct = total_analysts > 0
+      ? Math.round((strong_buy + buy) / total_analysts * 100)
+      : 0;
+
+    const meanLabel = consensus_mean
+      ? (consensus_mean <= 1.5 ? 'شراء قوي جداً'
+        : consensus_mean <= 2.5 ? 'شراء'
+        : consensus_mean <= 3.5 ? 'احتفظ'
+        : consensus_mean <= 4.5 ? 'بيع'
+        : 'بيع قوي')
+      : null;
+
+    res.json({
+      symbol,
+      total_analysts,
+      consensus,
+      consensus_ar,
+      consensus_mean: consensus_mean ? Math.round(consensus_mean * 100) / 100 : null,
+      consensus_label: meanLabel,
+      bullish_pct,
+      breakdown: { strong_buy, buy, hold, sell, strong_sell },
+      price_targets: { high: target_high, low: target_low, mean: target_mean, median: target_median },
+      recent_actions: recent_actions.slice(0, 15),
+      note: 'بيانات محللي وول ستريت المعتمدين — المصدر: Yahoo Finance'
+    });
+  } catch (e) {
     res.json(upstreamError(e, { symbol }));
   }
 });
