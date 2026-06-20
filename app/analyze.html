@@ -98,6 +98,16 @@ function render(d) {
       </div>
     </div>
 
+    ${d.mistake_risk > 0.3 ? `
+      <div class="card" style="border-color:#7a5400;background:#2a1f0a;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--yellow)">🧠 ذاكرة الأخطاء البرمجية</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6">
+          نمط المؤشرات الحالي يشبه بنسبة ${Math.round(d.mistake_risk * 100)}% أنماطاً تسبّبت بـ${d.mistake_matches} صفقة خاسرة سابقة لك على ${d.pair}.
+          ${d.caution ? `لذلك تم تخفيف الدرجة من ${d.raw_score} إلى ${d.score} لتجنّب تكرار الخطأ.` : ''}
+        </div>
+      </div>
+    ` : ''}
+
     <div class="cards">
       <div class="metric-card">
         <div class="metric-label">RSI</div>
