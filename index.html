@@ -73,6 +73,10 @@
   .price-change.up{color:var(--green);background:#0d2a14}
   .price-change.down{color:var(--red);background:#2a0d0d}
   .price-range{font-size:12px;color:var(--muted);margin-top:5px;direction:ltr}
+  .live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-left:6px;vertical-align:middle}
+  .live-dot.pulse{animation:livepulse 1s ease-out}
+  @keyframes livepulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.6)}100%{box-shadow:0 0 0 8px rgba(63,185,80,0)}}
+  .live-label{font-size:10px;color:var(--green);font-weight:600;vertical-align:middle}
 
   /* Signal banner */
   .signal-banner{margin:12px 16px 0;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:12px;font-size:14px;font-weight:600}
@@ -430,8 +434,54 @@ function onSearch() {
 // ============================================================
 // Tab switching
 // ============================================================
+// ============================================================
+// Live price polling
+// ============================================================
+let liveTimer = null;
+let liveKey = null;
+
+function stopLivePrice() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  liveKey = null;
+}
+
+function startLivePrice(sym, type) {
+  stopLivePrice();
+  const key = `${type}:${sym}`;
+  liveKey = key;
+  const prefix = type === 'crypto' ? '' : '$';
+
+  const tick = async () => {
+    if (liveKey !== key) return;
+    const priceEl = document.getElementById('livePriceMain');
+    if (!priceEl) { stopLivePrice(); return; } // غادر المستخدم تبويب التحليل
+    try {
+      const typeParam = type === 'crypto' ? 'crypto' : 'stock';
+      const r = await fetch(`/proxy/price/${sym}?type=${typeParam}`);
+      const d = await r.json();
+      if (liveKey !== key || d.error) return;
+      const changeEl = document.getElementById('livePriceChange');
+      const rangeEl  = document.getElementById('livePriceRange');
+      const dot      = document.getElementById('liveDot');
+      priceEl.textContent = `${prefix}${fmt(d.price)}`;
+      const up = (d.change1d || 0) >= 0;
+      if (changeEl) {
+        changeEl.textContent = `${up ? '+' : ''}${(d.change1d || 0).toFixed(2)}%`;
+        changeEl.className = `price-change ${up ? 'up' : 'down'}`;
+      }
+      if (rangeEl && d.high != null && d.low != null) {
+        rangeEl.textContent = `أعلى: ${prefix}${fmt(d.high)} | أدنى: ${prefix}${fmt(d.low)}`;
+      }
+      if (dot) { dot.classList.remove('pulse'); requestAnimationFrame(() => dot.classList.add('pulse')); }
+    } catch (_) {}
+  };
+  tick();
+  liveTimer = setInterval(tick, type === 'crypto' ? 4000 : 8000);
+}
+
 function switchTab(tab) {
   activeTab = tab;
+  if (tab !== 'analysis') stopLivePrice();
   ['analysis','recommend','congress','news','backtest','ai','scan'].forEach(t => {
     const panel = document.getElementById(`tab${t.charAt(0).toUpperCase()+t.slice(1)}`);
     if (panel) panel.classList.toggle('active', t === tab);
@@ -443,6 +493,8 @@ function switchTab(tab) {
     if (tab === 'backtest')  renderBacktestShell();
     else if (tab === 'scan') runScan();
     else if (currentSym)     loadTab(tab);
+  } else if (tab === 'analysis' && currentSym) {
+    startLivePrice(currentSym, currentType);
   }
 }
 
@@ -572,12 +624,12 @@ function renderAnalysis(d) {
   document.getElementById('analysisContent').innerHTML = `
     <div class="price-block">
       <div class="company-name">${d.name||d.symbol}${d.exchange ? ' · '+d.exchange : ''}</div>
-      <div class="ticker-name">${d.symbol}</div>
+      <div class="ticker-name">${d.symbol} <span class="live-dot" id="liveDot"></span><span class="live-label">لحظي</span></div>
       <div class="price-row">
-        <span class="price-main">${prefix}${fmt(d.price)}</span>
-        <span class="price-change ${changeClass}">${changeSign}${(d.change1d||0).toFixed(2)}%</span>
+        <span class="price-main" id="livePriceMain">${prefix}${fmt(d.price)}</span>
+        <span class="price-change ${changeClass}" id="livePriceChange">${changeSign}${(d.change1d||0).toFixed(2)}%</span>
       </div>
-      <div class="price-range">أعلى: ${prefix}${fmt(d.high)} | أدنى: ${prefix}${fmt(d.low)}</div>
+      <div class="price-range" id="livePriceRange">أعلى: ${prefix}${fmt(d.high)} | أدنى: ${prefix}${fmt(d.low)}</div>
     </div>
     <div class="signal-banner ${s.cls}">
       <span class="signal-icon">${s.icon}</span>
@@ -694,6 +746,7 @@ function renderAnalysis(d) {
     </div>
   `;
   buildChart(d, 'price');
+  startLivePrice(currentSym, currentType);
 }
 
 // ============================================================

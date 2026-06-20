@@ -1152,6 +1152,51 @@ app.get("/proxy/stock/:symbol", async (req, res) => {
   }
 });
 
+// ===== سعر لحظي خفيف (للتحديث المباشر دون إعادة حساب التحليل الكامل) =====
+app.get("/proxy/price/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const type = req.query.type === "crypto" ? "crypto" : "stock";
+
+  try {
+    if (type === "crypto") {
+      const pair = symbol.includes("_") ? symbol : `${symbol}_USDT`;
+      const r = await withTimeout(fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pair}`), 5000);
+      const arr = await r.json();
+      const t = Array.isArray(arr) ? arr[0] : null;
+      if (!t) return res.status(200).json({ error: "تعذر جلب السعر", symbol: pair });
+      return res.json({
+        symbol: pair,
+        price: parseFloat(t.last),
+        change1d: Math.round(parseFloat(t.change_percentage) * 100) / 100,
+        high: parseFloat(t.high_24h),
+        low: parseFloat(t.low_24h),
+        ts: Date.now()
+      });
+    }
+
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d`;
+    const r = await withTimeout(fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" }
+    }), 5000);
+    const json = await r.json();
+    const meta = json?.chart?.result?.[0]?.meta;
+    if (!meta) return res.status(200).json({ error: "تعذر جلب السعر", symbol });
+    res.json({
+      symbol,
+      price: Math.round((meta.regularMarketPrice ?? 0) * 100) / 100,
+      change1d: meta.previousClose
+        ? Math.round(((meta.regularMarketPrice - meta.previousClose) / meta.previousClose) * 10000) / 100
+        : 0,
+      high: meta.regularMarketDayHigh ?? null,
+      low: meta.regularMarketDayLow ?? null,
+      market_state: meta.marketState || null,
+      ts: Date.now()
+    });
+  } catch (e) {
+    res.status(200).json(upstreamError(e, { symbol }));
+  }
+});
+
 // GET /proxy/news/:symbol
 app.get("/proxy/news/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
