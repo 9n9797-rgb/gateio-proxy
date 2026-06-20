@@ -13,8 +13,11 @@ import * as autopilot from "./lib/autopilot.js";
 import * as paper from "./lib/portfolio.js";
 import * as strategy from "./lib/strategy.js";
 import * as risk from "./lib/riskManager.js";
-import { readJSON } from "./lib/store.js";
 import { calculateRSI, calculateOBV, getOBVTrend, calculateMA } from "./lib/indicators.js";
+import db from "./lib/db.js";
+import { requestLoginCode, verifyLoginCode, requireAuth, logout } from "./lib/auth.js";
+import { setKeys, removeKeys, hasKeys } from "./lib/exchangeKeys.js";
+import { executeRecommendation, dismissRecommendation } from "./lib/autopilot.js";
 
 dotenv.config();
 
@@ -271,53 +274,147 @@ app.get("/proxy/pairs", async (req, res) => {
   }
 });
 
-// ===== الأوتوبايلوت: التداول الآلي بالذكاء الصناعي =====
-autopilot.init(spotApi);
-
-// حالة الأوتوبايلوت الحالية
-app.get("/autopilot/status", (req, res) => {
-  const state = autopilot.getState();
-  const wallet = paper.getPortfolio();
-  res.json({
-    mode: state.mode,
-    pairs: state.pairs,
-    cycles_run: state.cyclesRun,
-    last_run_at: state.lastRunAt,
-    last_error: state.lastError,
-    live_positions: state.livePositions,
-    paper_positions: wallet.positions,
-    risk_config: risk.getRiskConfig()
-  });
-});
-
-// تغيير وضع التشغيل: off | signal | paper | live
-app.post("/autopilot/mode", (req, res) => {
+// ===== تسجيل الدخول بدون كلمة مرور (رمز يُرسل للبريد) =====
+app.post("/auth/request-code", async (req, res) => {
   try {
-    const state = autopilot.setMode(req.body.mode);
-    res.json({ ok: true, mode: state.mode });
+    await requestLoginCode(req.body.email);
+    res.json({ ok: true, message: "تم إرسال رمز الدخول إلى بريدك" });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
 });
 
-// تحديث قائمة الأزواج المتابَعة
-app.post("/autopilot/pairs", (req, res) => {
-  const pairs = Array.isArray(req.body.pairs) ? req.body.pairs : [];
-  if (!pairs.length) return res.status(400).json({ ok: false, error: "pairs مطلوبة" });
-  const state = autopilot.setPairs(pairs);
-  res.json({ ok: true, pairs: state.pairs });
+app.post("/auth/verify-code", (req, res) => {
+  try {
+    const result = verifyLoginCode(req.body.email, req.body.code);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/auth/logout", requireAuth, (req, res) => {
+  logout(req.headers.authorization.slice(7));
+  res.json({ ok: true });
+});
+
+app.get("/account/me", requireAuth, (req, res) => {
+  res.json({ id: req.user.id, email: req.user.email, has_exchange_keys: hasKeys(req.user.id) });
+});
+
+// ===== ربط/فك ربط مفاتيح Gate.io الخاصة بالمستخدم (تُشفّر قبل الحفظ) =====
+app.post("/account/exchange-keys", requireAuth, (req, res) => {
+  try {
+    setKeys(req.user.id, req.body.api_key, req.body.api_secret);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.delete("/account/exchange-keys", requireAuth, (req, res) => {
+  removeKeys(req.user.id);
+  res.json({ ok: true });
+});
+
+app.get("/account/exchange-keys/status", requireAuth, (req, res) => {
+  res.json({ connected: hasKeys(req.user.id) });
+});
+
+// ===== الأوتوبايلوت: التداول الآلي بالذكاء الصناعي (لكل مستخدم بياناته الخاصة) =====
+
+function getUserSettings(userId) {
+  const row = db.prepare("SELECT * FROM user_settings WHERE user_id = ?").get(userId);
+  return {
+    execution: row.execution,
+    decision_mode: row.decision_mode,
+    pairs: (row.pairs || "").split(",").map(s => s.trim()).filter(Boolean)
+  };
+}
+
+app.get("/autopilot/status", requireAuth, (req, res) => {
+  const settings = getUserSettings(req.user.id);
+  const wallet = paper.getPortfolio(req.user.id);
+  const livePositions = db.prepare("SELECT * FROM live_positions WHERE user_id = ?").all(req.user.id);
+  res.json({
+    execution: settings.execution,
+    decision_mode: settings.decision_mode,
+    pairs: settings.pairs,
+    has_exchange_keys: hasKeys(req.user.id),
+    paper_positions: wallet.positions,
+    live_positions: livePositions,
+    risk_config: risk.getRiskConfig()
+  });
+});
+
+// تحديث إعدادات الأوتوبايلوت: وضع التنفيذ والقرار والأزواج المتابَعة
+app.post("/autopilot/settings", requireAuth, (req, res) => {
+  const { execution, decision_mode, pairs } = req.body;
+  if (execution && !["off", "paper", "live"].includes(execution)) {
+    return res.status(400).json({ ok: false, error: "execution غير صالح" });
+  }
+  if (execution === "live" && process.env.AUTOPILOT_ALLOW_LIVE !== "true") {
+    return res.status(400).json({ ok: false, error: "التداول الحقيقي معطّل على هذا الخادم (AUTOPILOT_ALLOW_LIVE)" });
+  }
+  if (execution === "live" && !hasKeys(req.user.id)) {
+    return res.status(400).json({ ok: false, error: "اربط مفاتيح Gate.io أولاً من /account/exchange-keys" });
+  }
+  if (decision_mode && !["auto", "recommend_only"].includes(decision_mode)) {
+    return res.status(400).json({ ok: false, error: "decision_mode غير صالح" });
+  }
+
+  const current = getUserSettings(req.user.id);
+  const next = {
+    execution: execution ?? current.execution,
+    decision_mode: decision_mode ?? current.decision_mode,
+    pairs: Array.isArray(pairs) && pairs.length ? pairs.join(",") : current.pairs.join(",")
+  };
+  db.prepare(
+    "UPDATE user_settings SET execution = ?, decision_mode = ?, pairs = ? WHERE user_id = ?"
+  ).run(next.execution, next.decision_mode, next.pairs, req.user.id);
+
+  res.json({ ok: true, settings: getUserSettings(req.user.id) });
 });
 
 // سجل الصفقات المغلقة (حقيقية وتجريبية)
-app.get("/autopilot/trades", (req, res) => {
+app.get("/autopilot/trades", requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
-  const journal = readJSON("trade-journal", []);
-  res.json(journal.slice(-limit).reverse());
+  const rows = db
+    .prepare("SELECT * FROM trades WHERE user_id = ? ORDER BY id DESC LIMIT ?")
+    .all(req.user.id, limit);
+  res.json(rows.map(r => ({ ...r, votes: r.votes ? JSON.parse(r.votes) : {} })));
+});
+
+// التوصيات المعلّقة (لمن اختار وضع "توصيات فقط")
+app.get("/autopilot/recommendations", requireAuth, (req, res) => {
+  const status = req.query.status || "pending";
+  const rows = db
+    .prepare("SELECT * FROM recommendations WHERE user_id = ? AND status = ? ORDER BY id DESC LIMIT 100")
+    .all(req.user.id, status);
+  res.json(rows.map(r => ({ ...r, votes: r.votes ? JSON.parse(r.votes) : {} })));
+});
+
+app.post("/autopilot/recommendations/:id/execute", requireAuth, async (req, res) => {
+  try {
+    await executeRecommendation(req.user.id, Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/autopilot/recommendations/:id/dismiss", requireAuth, (req, res) => {
+  try {
+    dismissRecommendation(req.user.id, Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
 });
 
 // محفظة التداول الوهمي (Paper Trading) لتطوير الذكاء الصناعي بدون مخاطرة
-app.get("/autopilot/portfolio", (req, res) => {
-  const wallet = paper.getPortfolio();
+app.get("/autopilot/portfolio", requireAuth, (req, res) => {
+  const wallet = paper.getPortfolio(req.user.id);
   res.json({
     cash: wallet.cash,
     positions: wallet.positions,
@@ -328,22 +425,22 @@ app.get("/autopilot/portfolio", (req, res) => {
 });
 
 // إعادة تصفير المحفظة الوهمية للبدء من جديد
-app.post("/autopilot/portfolio/reset", (req, res) => {
-  const wallet = paper.resetPortfolio();
+app.post("/autopilot/portfolio/reset", requireAuth, (req, res) => {
+  const wallet = paper.resetPortfolio(req.user.id);
   res.json({ ok: true, wallet });
 });
 
-// أوزان المؤشرات التي تعلّمها النظام من نتائج الصفقات السابقة
-app.get("/autopilot/weights", (req, res) => {
-  res.json(strategy.getWeights());
+// أوزان المؤشرات التي تعلّمها النظام من نتائج صفقات هذا المستخدم
+app.get("/autopilot/weights", requireAuth, (req, res) => {
+  res.json(strategy.getWeights(req.user.id));
 });
 
-app.post("/autopilot/weights/reset", (req, res) => {
-  res.json(strategy.resetWeights());
+app.post("/autopilot/weights/reset", requireAuth, (req, res) => {
+  res.json(strategy.resetWeights(req.user.id));
 });
 
-// استئناف الأوتوبايلوت تلقائياً إذا كان يعمل قبل آخر إعادة تشغيل للخادم
-autopilot.bootstrapFromSavedState();
+// تشغيل حلقة الأوتوبايلوت (تفحص كل المستخدمين النشطين دورياً)
+autopilot.startLoop();
 
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
