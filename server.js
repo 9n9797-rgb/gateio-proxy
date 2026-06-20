@@ -12,6 +12,8 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import session from "express-session";
 import bcrypt from "bcryptjs";
+import http from "http";
+import { WebSocketServer, WebSocket } from "ws";
 
 dotenv.config();
 
@@ -42,7 +44,7 @@ function saveUsers(users) {
 if (!process.env.SESSION_SECRET) {
   console.warn("⚠️ SESSION_SECRET غير مضبوط — سيتم توليد مفتاح مؤقت (تنتهي الجلسات عند إعادة التشغيل)");
 }
-app.use(session({
+const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
   resave: false,
   saveUninitialized: false,
@@ -52,7 +54,8 @@ app.use(session({
     sameSite: "lax",
     maxAge: 30 * 24 * 3600000
   }
-}));
+});
+app.use(sessionMiddleware);
 
 const PUBLIC_PATHS = new Set(["/login.html", "/healthz", "/proxy/health"]);
 function isPublicPath(p) {
@@ -1815,6 +1818,95 @@ app.get("/proxy/analysts/:symbol", async (req, res) => {
   }
 });
 
+// ===== بث السعر اللحظي عبر WebSocket (Gate.io spot.tickers) =====
+// يفتح اتصال WebSocket واحد فقط مع Gate.io ويعيد توزيع التحديثات على عملاء المتصفح
+// المشتركين، بدل أن يستعلم كل عميل عبر polling كل عدة ثوانٍ — هذا يقلّل التأخير
+// من ثوانٍ إلى أجزاء من الثانية للعملات الرقمية. لا يوجد مصدر مجاني مماثل للأسهم
+// (Yahoo لا يوفر WebSocket عام)، فتبقى الأسهم على polling دوري.
+const gateSubscribers = new Map(); // pair -> Set<ws>
+let gateWS = null;
+let gateConnecting = false;
+
+function gateSend(ws, event, pair) {
+  ws.send(JSON.stringify({ time: Math.floor(Date.now() / 1000), channel: "spot.tickers", event, payload: [pair] }));
+}
+
+function ensureGateWS() {
+  if (gateWS && gateWS.readyState === WebSocket.OPEN) return gateWS;
+  if (gateConnecting) return null;
+  gateConnecting = true;
+  const ws = new WebSocket("wss://api.gateio.ws/ws/v4/");
+  ws.on("open", () => {
+    gateConnecting = false;
+    gateWS = ws;
+    for (const pair of gateSubscribers.keys()) gateSend(ws, "subscribe", pair);
+  });
+  ws.on("message", (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch (_) { return; }
+    if (msg.channel !== "spot.tickers" || msg.event !== "update" || !msg.result) return;
+    const r = msg.result;
+    const pair = r.currency_pair;
+    const subs = gateSubscribers.get(pair);
+    if (!subs || subs.size === 0) return;
+    const payload = JSON.stringify({
+      symbol: pair,
+      price: parseFloat(r.last),
+      change1d: Math.round(parseFloat(r.change_percentage) * 100) / 100,
+      high: parseFloat(r.high_24h),
+      low: parseFloat(r.low_24h),
+      ts: Date.now()
+    });
+    for (const client of subs) {
+      if (client.readyState === WebSocket.OPEN) client.send(payload);
+    }
+  });
+  ws.on("close", () => { gateWS = null; gateConnecting = false; setTimeout(ensureGateWS, 2000); });
+  ws.on("error", () => {});
+  return ws;
+}
+
+function subscribePair(pair, clientWs) {
+  if (!gateSubscribers.has(pair)) gateSubscribers.set(pair, new Set());
+  gateSubscribers.get(pair).add(clientWs);
+  const ws = ensureGateWS();
+  if (ws && ws.readyState === WebSocket.OPEN) gateSend(ws, "subscribe", pair);
+}
+
+function unsubscribePair(pair, clientWs) {
+  const subs = gateSubscribers.get(pair);
+  if (!subs) return;
+  subs.delete(clientWs);
+  if (subs.size === 0) {
+    gateSubscribers.delete(pair);
+    if (gateWS && gateWS.readyState === WebSocket.OPEN) gateSend(gateWS, "unsubscribe", pair);
+  }
+}
+
+const wss = new WebSocketServer({ noServer: true });
+wss.on("connection", (clientWs, req) => {
+  const u = new URL(req.url, "http://localhost");
+  let pair = (u.searchParams.get("symbol") || "").toUpperCase();
+  if (pair && !pair.includes("_")) pair = `${pair}_USDT`;
+  if (!pair || pair === "_USDT") { clientWs.close(); return; }
+  subscribePair(pair, clientWs);
+  clientWs.on("close", () => unsubscribePair(pair, clientWs));
+  clientWs.on("error", () => unsubscribePair(pair, clientWs));
+});
+
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));
+const httpServer = http.createServer(app);
+httpServer.on("upgrade", (req, socket, head) => {
+  if (!req.url.startsWith("/ws/price")) { socket.destroy(); return; }
+  const fakeRes = new http.ServerResponse(req);
+  sessionMiddleware(req, fakeRes, () => {
+    if (!req.session || !req.session.userId) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  });
+});
+httpServer.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));

@@ -456,14 +456,45 @@ async function logout() {
 }
 
 // ============================================================
-// Live price polling
+// Live price feed — WebSocket لحظي للعملات الرقمية (Gate.io)، polling للأسهم
+// (لا يوجد مصدر مجاني بـ WebSocket عام لأسعار الأسهم)
 // ============================================================
-let liveTimer = null;
-let liveKey = null;
+let liveTimer  = null;
+let liveSocket = null;
+let liveKey    = null;
 
 function stopLivePrice() {
-  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (liveTimer)  { clearInterval(liveTimer); liveTimer = null; }
+  if (liveSocket) { try { liveSocket.close(); } catch (_) {} liveSocket = null; }
   liveKey = null;
+}
+
+function applyLiveTick(d, prefix) {
+  const priceEl = document.getElementById('livePriceMain');
+  if (!priceEl) { stopLivePrice(); return; } // غادر المستخدم تبويب التحليل
+  const changeEl = document.getElementById('livePriceChange');
+  const rangeEl  = document.getElementById('livePriceRange');
+  const dot      = document.getElementById('liveDot');
+  priceEl.textContent = `${prefix}${fmt(d.price)}`;
+  const up = (d.change1d || 0) >= 0;
+  if (changeEl) {
+    changeEl.textContent = `${up ? '+' : ''}${(d.change1d || 0).toFixed(2)}%`;
+    changeEl.className = `price-change ${up ? 'up' : 'down'}`;
+  }
+  if (rangeEl && d.high != null && d.low != null) {
+    rangeEl.textContent = `أعلى: ${prefix}${fmt(d.high)} | أدنى: ${prefix}${fmt(d.low)}`;
+  }
+  if (dot) { dot.classList.remove('pulse'); requestAnimationFrame(() => dot.classList.add('pulse')); }
+}
+
+async function pollTick(sym, type, prefix, key) {
+  if (liveKey !== key) return;
+  try {
+    const r = await fetch(`/proxy/price/${sym}?type=${type}`);
+    const d = await r.json();
+    if (liveKey !== key || d.error) return;
+    applyLiveTick(d, prefix);
+  } catch (_) {}
 }
 
 function startLivePrice(sym, type) {
@@ -472,32 +503,28 @@ function startLivePrice(sym, type) {
   liveKey = key;
   const prefix = type === 'crypto' ? '' : '$';
 
-  const tick = async () => {
-    if (liveKey !== key) return;
-    const priceEl = document.getElementById('livePriceMain');
-    if (!priceEl) { stopLivePrice(); return; } // غادر المستخدم تبويب التحليل
-    try {
-      const typeParam = type === 'crypto' ? 'crypto' : 'stock';
-      const r = await fetch(`/proxy/price/${sym}?type=${typeParam}`);
-      const d = await r.json();
-      if (liveKey !== key || d.error) return;
-      const changeEl = document.getElementById('livePriceChange');
-      const rangeEl  = document.getElementById('livePriceRange');
-      const dot      = document.getElementById('liveDot');
-      priceEl.textContent = `${prefix}${fmt(d.price)}`;
-      const up = (d.change1d || 0) >= 0;
-      if (changeEl) {
-        changeEl.textContent = `${up ? '+' : ''}${(d.change1d || 0).toFixed(2)}%`;
-        changeEl.className = `price-change ${up ? 'up' : 'down'}`;
+  if (type === 'crypto') {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/ws/price?symbol=${encodeURIComponent(sym)}`);
+    liveSocket = ws;
+    ws.onmessage = (ev) => {
+      if (liveKey !== key) return;
+      try {
+        const d = JSON.parse(ev.data);
+        if (!d.error) applyLiveTick(d, prefix);
+      } catch (_) {}
+    };
+    ws.onclose = () => {
+      // عند انقطاع الاتصال اللحظي، رجوع تلقائي لـ polling كخطة بديلة
+      if (liveKey === key && !liveTimer) {
+        liveTimer = setInterval(() => pollTick(sym, 'crypto', prefix, key), 4000);
       }
-      if (rangeEl && d.high != null && d.low != null) {
-        rangeEl.textContent = `أعلى: ${prefix}${fmt(d.high)} | أدنى: ${prefix}${fmt(d.low)}`;
-      }
-      if (dot) { dot.classList.remove('pulse'); requestAnimationFrame(() => dot.classList.add('pulse')); }
-    } catch (_) {}
-  };
-  tick();
-  liveTimer = setInterval(tick, type === 'crypto' ? 4000 : 8000);
+    };
+    return;
+  }
+
+  pollTick(sym, 'stock', prefix, key);
+  liveTimer = setInterval(() => pollTick(sym, 'stock', prefix, key), 8000);
 }
 
 function switchTab(tab) {
