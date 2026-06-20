@@ -184,7 +184,11 @@ def close_futures(contracts: int, execute: bool) -> dict[str, Any]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--market", choices=["spot", "futures"], required=True)
-    ap.add_argument("--btc-move-min-usd", type=float, default=70.0)
+    ap.add_argument("--btc-move-min-usd", type=float, default=70.0,
+                     help="fixed dollar move required to enter; ignored if --btc-move-min-pct is set")
+    ap.add_argument("--btc-move-min-pct", type=float, default=None,
+                     help="require this %% move (of bucket-start price) instead of a fixed dollar amount, "
+                          "e.g. 0.05 for 0.05%%. Overrides --btc-move-min-usd when set.")
     ap.add_argument("--stake-usd", type=float, default=5.0)
     ap.add_argument("--leverage", type=int, default=5, help="futures only")
     ap.add_argument("--stop-loss-pct", type=float, default=0.5, help="close if price moves this %% against entry, relative to the bucket move target")
@@ -218,16 +222,22 @@ def main() -> None:
         price_now = fetch_btc_price()
         move_usd = (price_now - bucket_start_price) if (price_now is not None and bucket_start_price is not None) else None
 
+        if args.btc_move_min_pct is not None and bucket_start_price is not None:
+            move_min_usd = bucket_start_price * args.btc_move_min_pct / 100.0
+        else:
+            move_min_usd = args.btc_move_min_usd
+
         report["attempts"].append({
             "ts": ts_utc(), "bucket": bucket_id, "seconds_left": sec_left,
             "bucket_start_price": bucket_start_price, "price_now": price_now, "move_usd": move_usd,
+            "move_min_usd": move_min_usd,
         })
 
         if sec_left > args.min_entry_seconds_left or sec_left <= args.exit_before_sec:
             time.sleep(args.poll_sec)
             continue
 
-        if move_usd is None or abs(move_usd) < args.btc_move_min_usd:
+        if move_usd is None or abs(move_usd) < move_min_usd:
             time.sleep(args.poll_sec)
             continue
 
