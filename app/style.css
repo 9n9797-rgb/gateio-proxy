@@ -1,0 +1,109 @@
+:root{
+  --bg:#0d1117;--card:#161b22;--card2:#1c2128;--border:#30363d;
+  --text:#e6edf3;--muted:#7d8590;--green:#3fb950;--red:#f85149;
+  --yellow:#d29922;--blue:#58a6ff;--purple:#8b949e;
+  --accent:#238636;--accent2:#1a7f37;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+body{min-height:100vh;max-width:480px;margin:0 auto;padding:0 0 86px;direction:rtl}
+
+a{color:inherit;text-decoration:none}
+
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
+.header h1{font-size:17px;font-weight:600;letter-spacing:-.3px}
+.btn-icon{background:var(--card);border:1px solid var(--border);color:var(--text);width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;transition:.15s}
+.btn-icon:hover{background:var(--card2)}
+
+/* Generic layout */
+.page{padding:16px}
+.section-title{font-size:13px;font-weight:600;color:var(--muted);margin:18px 0 10px;text-transform:uppercase;letter-spacing:.5px}
+.section-title:first-child{margin-top:0}
+
+/* Cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px}
+.card + .card{margin-top:10px}
+.cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.metric-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 10px;text-align:center}
+.metric-label{font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:500}
+.metric-value{font-size:20px;font-weight:700}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;border-radius:6px;padding:3px 8px}
+.badge-green{color:var(--green);background:#0d2a14}
+.badge-red{color:var(--red);background:#2a0d0d}
+.badge-yellow{color:var(--yellow);background:#2a1a0a}
+.badge-blue{color:var(--blue);background:#0d1f2a}
+
+/* Forms */
+.form-group{margin-bottom:14px}
+.form-label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+input[type=text],input[type=email],input[type=number],input[type=password],select{
+  width:100%;background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:11px 14px;color:var(--text);font-size:15px;outline:none;font-family:inherit
+}
+input:focus,select:focus{border-color:var(--blue)}
+input::placeholder{color:var(--muted)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;
+  padding:12px 18px;font-size:15px;font-weight:600;cursor:pointer;transition:.15s;width:100%}
+.btn-primary{background:var(--blue);color:#000}
+.btn-primary:hover{opacity:.88}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-green{background:var(--accent);color:#fff}
+.btn-red{background:#3a1414;color:var(--red);border:1px solid #5a1c1c}
+.btn-ghost{background:var(--card);color:var(--text);border:1px solid var(--border)}
+.btn-sm{padding:7px 12px;font-size:13px;width:auto}
+
+/* Segmented toggle */
+.seg{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:3px}
+.seg-opt{flex:1;text-align:center;padding:8px 6px;border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);transition:.15s}
+.seg-opt.active{background:var(--blue);color:#000;font-weight:600}
+
+/* Chips */
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{flex-shrink:0;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:13px;cursor:pointer;transition:.15s;direction:ltr}
+.chip:hover,.chip.active{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+
+/* List items (positions, trades, recommendations) */
+.list-item{display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px}
+.list-item .li-main{font-size:14px;font-weight:600;direction:ltr}
+.list-item .li-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.list-item .li-actions{display:flex;gap:6px}
+
+/* States */
+.state{text-align:center;padding:50px 16px;color:var(--muted);font-size:14px}
+.spinner{display:inline-block;width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--border);
+  color:var(--text);padding:10px 18px;border-radius:10px;font-size:13px;z-index:50;max-width:90%;text-align:center}
+.toast.error{border-color:#5a1c1c;color:var(--red)}
+.toast.success{border-color:var(--accent2);color:var(--green)}
+
+/* Bottom nav */
+.nav-bottom{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:var(--bg);
+  border-top:1px solid var(--border);display:flex;justify-content:space-around;padding:8px 0 calc(8px + env(safe-area-inset-bottom));z-index:20}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--muted);cursor:pointer;padding:4px 10px;border-radius:8px}
+.nav-item.active{color:var(--blue)}
+.nav-item .nav-icon{font-size:19px}
+
+/* Chart */
+.chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;position:relative;height:220px}
+canvas{max-width:100%}
+.chart-tabs{display:flex;gap:6px;margin-bottom:10px;justify-content:flex-end}
+.chart-tab{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;transition:.15s;direction:ltr}
+.chart-tab.active{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+
+/* Signal banner */
+.signal-banner{border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;font-size:15px;font-weight:600;margin-bottom:14px}
+.signal-banner.buy{background:#0d2a14;border:1px solid #238636}
+.signal-banner.hold{background:#2a1f0a;border:1px solid #7a5400}
+.signal-banner.sell{background:#2a0d0d;border:1px solid #8c1a1a}
+.signal-icon{font-size:26px;flex-shrink:0}
+.signal-text small{display:block;font-weight:400;font-size:12px;color:var(--muted);margin-top:2px}
+
+.muted{color:var(--muted)}
+.center{text-align:center}
+.flex-between{display:flex;justify-content:space-between;align-items:center}
+.mt{margin-top:14px}

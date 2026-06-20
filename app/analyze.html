@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>التحليل — Gate.io Autopilot</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+
+<div class="header">
+  <span></span>
+  <h1>التحليل الشخصي</h1>
+  <span></span>
+</div>
+
+<div class="page" style="padding-bottom:0">
+  <div class="form-group" style="display:flex;gap:8px;margin-bottom:10px">
+    <input type="text" id="pairInput" placeholder="مثال: BTC_USDT" value="BTC_USDT" style="direction:ltr;text-transform:uppercase"
+      onkeydown="if(event.key==='Enter')analyze()">
+    <button class="btn btn-primary" id="analyzeBtn" style="width:auto" onclick="analyze()">تحليل</button>
+  </div>
+  <div class="chips" style="margin-bottom:10px">
+    <span class="chip active" onclick="quickPair(this,'BTC_USDT')">BTC</span>
+    <span class="chip" onclick="quickPair(this,'ETH_USDT')">ETH</span>
+    <span class="chip" onclick="quickPair(this,'SOL_USDT')">SOL</span>
+    <span class="chip" onclick="quickPair(this,'BNB_USDT')">BNB</span>
+    <span class="chip" onclick="quickPair(this,'XRP_USDT')">XRP</span>
+    <span class="chip" onclick="quickPair(this,'DOGE_USDT')">DOGE</span>
+  </div>
+</div>
+
+<div class="page" id="content" style="padding-top:0">
+  <div class="state">ابحث عن زوج عملات لتحليله بأوزانك الشخصية المتعلَّمة</div>
+</div>
+
+<script src="/app/app.js"></script>
+<script>
+requireAuthPage();
+navBar("analyze");
+
+let chartInst = null;
+let lastData = null;
+
+function quickPair(el, pair) {
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('pairInput').value = pair;
+  analyze();
+}
+
+async function analyze() {
+  const pair = document.getElementById('pairInput').value.trim().toUpperCase().replace('/', '_');
+  if (!pair) return;
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true; btn.textContent = '...';
+  document.getElementById('content').innerHTML = '<div class="state"><div class="spinner"></div><div>جاري التحليل…</div></div>';
+
+  try {
+    const data = await API.req(`/autopilot/analyze/${pair}`);
+    lastData = data;
+    render(data);
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="state">❌<br><br>${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'تحليل';
+  }
+}
+
+function render(d) {
+  const signalInfo = {
+    BUY:  { icon: '✅', label: 'إشارة شراء', cls: 'buy' },
+    HOLD: { icon: '⚠️', label: 'محايد — انتظار', cls: 'hold' },
+    SELL: { icon: '❌', label: 'إشارة بيع', cls: 'sell' }
+  };
+  const s = signalInfo[d.action] || signalInfo.HOLD;
+  const changeClass = d.change_pct >= 0 ? 'badge-green' : 'badge-red';
+  const changeSign = d.change_pct >= 0 ? '+' : '';
+
+  document.getElementById('content').innerHTML = `
+    <div class="card flex-between" style="margin-bottom:14px">
+      <div>
+        <div style="font-size:18px;font-weight:700;direction:ltr">${d.pair}</div>
+        <div style="font-size:26px;font-weight:700;direction:ltr">$${formatNum(d.price)}</div>
+      </div>
+      <div style="text-align:left">
+        <span class="badge ${changeClass}">${changeSign}${d.change_pct}%</span>
+        <div class="muted" style="font-size:11px;margin-top:6px;direction:ltr">H $${formatNum(d.high)} / L $${formatNum(d.low)}</div>
+      </div>
+    </div>
+
+    <div class="signal-banner ${s.cls}">
+      <span class="signal-icon">${s.icon}</span>
+      <div>
+        <div>${s.label} — الدرجة ${d.score}</div>
+        <small>${d.engine === 'llm' ? `تأكيد AI: ${d.ai_reason || ''}` : 'محرك كمّي (مؤشرات + أوزانك المتعلَّمة)'}</small>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="metric-card">
+        <div class="metric-label">RSI</div>
+        <div class="metric-value">${d.indicators.rsi}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">OBV</div>
+        <div class="metric-value" style="font-size:14px">${d.indicators.obv_trend === 'rising' ? '↑ صاعد' : d.indicators.obv_trend === 'falling' ? '↓ هابط' : '→ محايد'}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">MA20/50</div>
+        <div class="metric-value" style="font-size:13px">$${formatNum(d.indicators.ma20)}<br>$${formatNum(d.indicators.ma50)}</div>
+      </div>
+    </div>
+
+    <div class="section-title">أصوات المؤشرات (مرجّحة بأوزانك)</div>
+    <div class="card">
+      ${Object.entries(d.votes).map(([k, v]) => `
+        <div class="flex-between" style="margin-bottom:8px">
+          <span style="font-size:13px">${({rsi:'RSI', macd:'MACD', trend:'الاتجاه', obv:'OBV'})[k] || k} (وزن ${d.weights[k]?.toFixed(2) ?? '1.00'})</span>
+          <span class="badge ${v > 0 ? 'badge-green' : v < 0 ? 'badge-red' : 'badge-yellow'}">${v > 0 ? '+' : ''}${v}</span>
+        </div>
+      `).join("")}
+    </div>
+
+    <div class="chart-section mt">
+      <div class="chart-tabs">
+        <span class="chart-tab" onclick="switchMode('volume',this)">الحجم 📊</span>
+        <span class="chart-tab" onclick="switchMode('rsi',this)">RSI</span>
+        <span class="chart-tab active" onclick="switchMode('price',this)">السعر ✏️</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="mainChart"></canvas>
+      </div>
+    </div>
+
+    ${d.action !== 'HOLD' ? `
+      <button class="btn ${d.action === 'BUY' ? 'btn-green' : 'btn-red'} mt" onclick="executeNow('${d.pair}')">
+        ${d.action === 'BUY' ? 'تنفيذ شراء الآن' : 'تنفيذ بيع الآن'}
+      </button>
+    ` : ''}
+
+    <div class="card mt" style="font-size:11px;color:var(--muted);line-height:1.6">
+      ⚠️ التنفيذ هنا يعمل وفق وضع التنفيذ الحالي لحسابك (محفظة وهمية أو حقيقي) من صفحة الإعدادات، ويخضع لإدارة المخاطر الثابتة.
+    </div>
+  `;
+
+  buildChart(d, 'price');
+}
+
+function switchMode(mode, el) {
+  document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  if (lastData) buildChart(lastData, mode);
+}
+
+function buildChart(d, mode) {
+  if (chartInst) { chartInst.destroy(); chartInst = null; }
+  const candles = d.candles.slice(-30);
+  const labels = candles.map(c => {
+    const dt = new Date(c.time);
+    return `${dt.getHours()}:${String(dt.getMinutes()).padStart(2,'0')}`;
+  });
+
+  const ctx = document.getElementById('mainChart');
+  if (!ctx) return;
+
+  if (mode === 'price') {
+    chartInst = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'السعر', data: candles.map(c => c.close), borderColor: '#58a6ff',
+            backgroundColor: 'rgba(88,166,255,0.12)', fill: true, tension: .35, pointRadius: 0, borderWidth: 2 },
+          { label: 'MA20', data: candles.map(c => c.ma20), borderColor: 'rgba(255,193,7,.7)',
+            borderWidth: 1.5, borderDash: [4,3], pointRadius: 0, fill: false, tension: .35 }
+        ]
+      },
+      options: chartOpts('السعر $')
+    });
+  } else if (mode === 'volume') {
+    chartInst = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'الحجم', data: candles.map(c => c.volume),
+          backgroundColor: candles.map((c,i) => i===0 ? '#58a6ff44' : c.close >= candles[i-1]?.close ? '#3fb95088' : '#f8514988'),
+          borderRadius: 2
+        }]
+      },
+      options: chartOpts('الحجم')
+    });
+  } else if (mode === 'rsi') {
+    chartInst = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'RSI', data: candles.map(c => c.rsi), borderColor: '#8b949e', borderWidth: 2,
+            backgroundColor: 'rgba(139,148,158,.1)', fill: true, tension: .3, pointRadius: 0 },
+          { label: '70', data: candles.map(() => 70), borderColor: '#f8514955', borderWidth: 1, borderDash: [3,3], pointRadius: 0, fill: false },
+          { label: '30', data: candles.map(() => 30), borderColor: '#3fb95055', borderWidth: 1, borderDash: [3,3], pointRadius: 0, fill: false }
+        ]
+      },
+      options: chartOpts('RSI', 0, 100)
+    });
+  }
+}
+
+function chartOpts(label, min, max) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#161b22', borderColor: '#30363d', borderWidth: 1,
+        titleColor: '#7d8590', bodyColor: '#e6edf3',
+        callbacks: { label: ctx => ` ${label}: ${formatNum(ctx.raw)}` }
+      }
+    },
+    scales: {
+      x: { grid: { color: '#21262d' }, ticks: { color: '#7d8590', maxTicksLimit: 6, font: { size: 10 } } },
+      y: {
+        position: 'left', grid: { color: '#21262d' },
+        ticks: { color: '#7d8590', font: { size: 10 }, callback: v => formatNum(v) },
+        ...(min != null ? { min } : {}),
+        ...(max != null ? { max } : {})
+      }
+    }
+  };
+}
+
+async function executeNow(pair) {
+  if (!confirm('تنفيذ هذا القرار الآن على حسابك؟')) return;
+  try {
+    await API.req(`/autopilot/analyze/${pair}/execute`, { method: 'POST' });
+    showToast('تم التنفيذ بنجاح', 'success');
+    analyze();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
+analyze();
+</script>
+</body>
+</html>

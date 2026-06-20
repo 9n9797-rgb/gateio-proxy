@@ -17,7 +17,7 @@ import { calculateRSI, calculateOBV, getOBVTrend, calculateMA } from "./lib/indi
 import db from "./lib/db.js";
 import { requestLoginCode, verifyLoginCode, requireAuth, logout } from "./lib/auth.js";
 import { setKeys, removeKeys, hasKeys } from "./lib/exchangeKeys.js";
-import { executeRecommendation, dismissRecommendation } from "./lib/autopilot.js";
+import { executeRecommendation, dismissRecommendation, analyzePair, analyzeAndExecute } from "./lib/autopilot.js";
 
 dotenv.config();
 
@@ -437,6 +437,30 @@ app.get("/autopilot/weights", requireAuth, (req, res) => {
 
 app.post("/autopilot/weights/reset", requireAuth, (req, res) => {
   res.json(strategy.resetWeights(req.user.id));
+});
+
+// تحليل كامل شخصي لزوج معيّن (يستخدم أوزان وتعلّم هذا المستخدم) — صفحة التحليل بالواجهة
+app.get("/autopilot/analyze/:pair", requireAuth, async (req, res) => {
+  const pair = req.params.pair.toUpperCase();
+  const interval = req.query.interval || "15m";
+  try {
+    const result = await analyzePair(req.user.id, pair, interval);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// تحليل فوري + تنفيذ مباشر بقرار المستخدم (يفتح/يغلق مركز حسب وضع paper/live الحالي)
+app.post("/autopilot/analyze/:pair/execute", requireAuth, async (req, res) => {
+  const pair = req.params.pair.toUpperCase();
+  const interval = req.query.interval || "15m";
+  try {
+    const result = await analyzeAndExecute(req.user.id, pair, interval);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
 });
 
 // تشغيل حلقة الأوتوبايلوت (تفحص كل المستخدمين النشطين دورياً)

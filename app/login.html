@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>تسجيل الدخول — Gate.io Autopilot</title>
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+
+<div class="header">
+  <span></span>
+  <h1>Gate.io AI Autopilot</h1>
+  <span></span>
+</div>
+
+<div class="page">
+  <div class="card center" style="padding:28px 18px">
+    <div style="font-size:34px;margin-bottom:6px">🔐</div>
+    <div style="font-size:16px;font-weight:600;margin-bottom:4px">تسجيل الدخول بدون كلمة مرور</div>
+    <div class="muted" style="font-size:13px;margin-bottom:18px">أدخل بريدك الإلكتروني وسنرسل لك رمز دخول من 6 أرقام</div>
+
+    <div id="stepEmail">
+      <div class="form-group">
+        <label class="form-label">البريد الإلكتروني</label>
+        <input type="email" id="email" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <button class="btn btn-primary" id="sendBtn" onclick="sendCode()">إرسال رمز الدخول</button>
+    </div>
+
+    <div id="stepCode" style="display:none">
+      <div class="form-group">
+        <label class="form-label">رمز الدخول (6 أرقام)</label>
+        <input type="text" id="code" placeholder="123456" maxlength="6" style="text-align:center;letter-spacing:4px;direction:ltr">
+      </div>
+      <button class="btn btn-primary" id="verifyBtn" onclick="verifyCode()">تأكيد ودخول</button>
+      <button class="btn btn-ghost mt" onclick="backToEmail()">رجوع لتغيير البريد</button>
+    </div>
+  </div>
+
+  <div class="card mt" style="font-size:11px;color:var(--muted);line-height:1.6">
+    ⚠️ بدون ضبط SMTP على الخادم، يُطبع الرمز في سجل الخادم فقط لأغراض التجربة المحلية.
+  </div>
+</div>
+
+<script src="/app/app.js"></script>
+<script>
+if (API.token()) location.href = "/app/dashboard.html";
+
+let pendingEmail = "";
+
+async function sendCode() {
+  const email = document.getElementById("email").value.trim();
+  if (!email) return showToast("أدخل بريدك الإلكتروني", "error");
+  const btn = document.getElementById("sendBtn");
+  btn.disabled = true; btn.textContent = "...";
+  try {
+    await API.req("/auth/request-code", { method: "POST", body: JSON.stringify({ email }) });
+    pendingEmail = email;
+    document.getElementById("stepEmail").style.display = "none";
+    document.getElementById("stepCode").style.display = "block";
+    showToast("تم إرسال الرمز، تحقق من بريدك", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "إرسال رمز الدخول";
+  }
+}
+
+async function verifyCode() {
+  const code = document.getElementById("code").value.trim();
+  if (!code) return showToast("أدخل الرمز", "error");
+  const btn = document.getElementById("verifyBtn");
+  btn.disabled = true; btn.textContent = "...";
+  try {
+    const result = await API.req("/auth/verify-code", { method: "POST", body: JSON.stringify({ email: pendingEmail, code }) });
+    API.setToken(result.token);
+    location.href = "/app/dashboard.html";
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "تأكيد ودخول";
+  }
+}
+
+function backToEmail() {
+  document.getElementById("stepCode").style.display = "none";
+  document.getElementById("stepEmail").style.display = "block";
+}
+</script>
+</body>
+</html>

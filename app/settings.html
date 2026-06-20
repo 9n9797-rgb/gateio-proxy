@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>الإعدادات — Gate.io Autopilot</title>
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+
+<div class="header">
+  <span></span>
+  <h1>الإعدادات</h1>
+  <span></span>
+</div>
+
+<div class="page" id="content">
+  <div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>
+</div>
+
+<script src="/app/app.js"></script>
+<script>
+requireAuthPage();
+navBar("settings");
+
+const ALL_PAIRS = ["BTC_USDT","ETH_USDT","SOL_USDT","BNB_USDT","XRP_USDT","DOGE_USDT","AVAX_USDT","ADA_USDT"];
+let selectedPairs = [];
+
+async function load() {
+  const content = document.getElementById("content");
+  try {
+    const [me, status] = await Promise.all([
+      API.req("/account/me"),
+      API.req("/autopilot/status")
+    ]);
+    selectedPairs = status.pairs.length ? status.pairs : ["BTC_USDT"];
+    render(me, status);
+  } catch (e) {
+    content.innerHTML = `<div class="state">❌<br><br>${e.message}</div>`;
+  }
+}
+
+function render(me, status) {
+  document.getElementById("content").innerHTML = `
+    <div class="section-title">الحساب</div>
+    <div class="card">
+      <div style="font-size:14px;margin-bottom:4px">${me.email}</div>
+      <div class="muted" style="font-size:12px">معرّف المستخدم #${me.id}</div>
+    </div>
+
+    <div class="section-title">مفاتيح Gate.io</div>
+    <div class="card">
+      <div class="flex-between">
+        <span>${me.has_exchange_keys ? "✅ مرتبطة" : "❌ غير مرتبطة"}</span>
+        ${me.has_exchange_keys ? '<button class="btn btn-red btn-sm" onclick="removeKeys()">فك الربط</button>' : ''}
+      </div>
+      ${!me.has_exchange_keys ? `
+        <div class="form-group mt">
+          <label class="form-label">API Key</label>
+          <input type="text" id="apiKey" style="direction:ltr">
+        </div>
+        <div class="form-group">
+          <label class="form-label">API Secret</label>
+          <input type="password" id="apiSecret" style="direction:ltr">
+        </div>
+        <button class="btn btn-primary" onclick="saveKeys()">ربط الحساب</button>
+      ` : ''}
+    </div>
+
+    <div class="section-title">وضع التنفيذ</div>
+    <div class="seg" id="execSeg">
+      <div class="seg-opt" data-v="off">متوقف</div>
+      <div class="seg-opt" data-v="paper">محفظة وهمية</div>
+      <div class="seg-opt" data-v="live">حساب حقيقي</div>
+    </div>
+
+    <div class="section-title">وضع القرار</div>
+    <div class="seg" id="modeSeg">
+      <div class="seg-opt" data-v="recommend_only">توصيات فقط</div>
+      <div class="seg-opt" data-v="auto">تداول تلقائي</div>
+    </div>
+
+    <div class="card mt" style="font-size:11px;color:var(--muted);line-height:1.6">
+      ⚠️ وقف الخسارة وجني الربح يُنفَّذان تلقائياً دائماً لحماية رأس المال حتى في وضع "توصيات فقط".
+      وضع "حساب حقيقي" معطّل على الخادم ما لم يُفعّله المشغّل عمداً.
+    </div>
+
+    <div class="section-title">الأزواج المتابَعة</div>
+    <div class="chips" id="pairChips">
+      ${ALL_PAIRS.map(p => `<span class="chip ${selectedPairs.includes(p) ? 'active' : ''}" data-p="${p}" onclick="togglePair('${p}')">${p.replace('_USDT','')}</span>`).join("")}
+    </div>
+
+    <button class="btn btn-primary mt" onclick="saveSettings()">حفظ الإعدادات</button>
+  `;
+
+  document.querySelectorAll("#execSeg .seg-opt").forEach(el => {
+    if (el.dataset.v === status.execution) el.classList.add("active");
+    el.onclick = () => selectSeg("execSeg", el);
+  });
+  document.querySelectorAll("#modeSeg .seg-opt").forEach(el => {
+    if (el.dataset.v === status.decision_mode) el.classList.add("active");
+    el.onclick = () => selectSeg("modeSeg", el);
+  });
+}
+
+function selectSeg(groupId, el) {
+  document.querySelectorAll(`#${groupId} .seg-opt`).forEach(o => o.classList.remove("active"));
+  el.classList.add("active");
+}
+
+function togglePair(pair) {
+  if (selectedPairs.includes(pair)) {
+    selectedPairs = selectedPairs.filter(p => p !== pair);
+  } else {
+    selectedPairs.push(pair);
+  }
+  document.querySelector(`.chip[data-p="${pair}"]`).classList.toggle("active");
+}
+
+async function saveKeys() {
+  const api_key = document.getElementById("apiKey").value.trim();
+  const api_secret = document.getElementById("apiSecret").value.trim();
+  if (!api_key || !api_secret) return showToast("أدخل المفتاح والسر", "error");
+  try {
+    await API.req("/account/exchange-keys", { method: "POST", body: JSON.stringify({ api_key, api_secret }) });
+    showToast("تم ربط الحساب بنجاح", "success");
+    load();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+async function removeKeys() {
+  if (!confirm("فك ربط مفاتيح Gate.io؟")) return;
+  try {
+    await API.req("/account/exchange-keys", { method: "DELETE" });
+    showToast("تم فك الربط");
+    load();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+async function saveSettings() {
+  const execution = document.querySelector("#execSeg .seg-opt.active")?.dataset.v;
+  const decision_mode = document.querySelector("#modeSeg .seg-opt.active")?.dataset.v;
+  if (!selectedPairs.length) return showToast("اختر زوجاً واحداً على الأقل", "error");
+  try {
+    await API.req("/autopilot/settings", {
+      method: "POST",
+      body: JSON.stringify({ execution, decision_mode, pairs: selectedPairs })
+    });
+    showToast("تم حفظ الإعدادات", "success");
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+load();
+</script>
+</body>
+</html>
