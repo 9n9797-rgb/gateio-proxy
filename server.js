@@ -1484,7 +1484,7 @@ function _simulate(closes, volumes, times, macdData, rocArr, initialCapital, mom
   const ma20Arr = calculateMA(closes, 20);
 
   let cash = initialCapital, shares = 0, inPosition = false;
-  let entryPrice = 0, entryDate = null;
+  let entryPrice = 0, entryDate = null, peakPrice = 0;
   const trades = [], equity = [];
   const START   = 30;
 
@@ -1495,37 +1495,41 @@ function _simulate(closes, volumes, times, macdData, rocArr, initialCapital, mom
     const obvTrend = getOBVTrendAt(obvArr, i);
     const aboveMA  = close > ma20;
 
-    // === Momentum filter (MACD + ROC) ===
+    // === Momentum confirmation (MACD + ROC) ===
     const roc20       = rocArr[i] ?? 0;
     const macdAbove   = macdData.line[i] > macdData.signal[i];
-    const momentumOn  = momentumFilter && macdAbove && roc20 > 3; // MACD صاعد + سعر ارتفع >3% خلال 20 يوم
+    const momentumOn  = macdAbove && roc20 > 0;
+
+    if (inPosition && close > peakPrice) peakPrice = close;
 
     // ---- Entry ----
+    // الفلتر الأساسي: زخم صاعد فعلي (MACD + ROC) بدل الاعتماد فقط على RSI/OBV
+    // فلتر الزخم: شرط أقوى — ROC أعلى يتطلب تسارعاً حقيقياً في السعر
     const buySignal = !inPosition
-      && rsi >= 33 && rsi <= 60
+      && rsi >= 35 && rsi <= 58
       && obvTrend === 'rising'
-      && aboveMA;
+      && aboveMA
+      && macdAbove
+      && (momentumFilter ? roc20 > 2 : roc20 > 0);
 
     // ---- Exit ----
-    const stopLoss8     = inPosition && close < entryPrice * 0.92;
-    // بدون فلتر: اخرج لو RSI > 68 أو ضعف مؤشرات
-    // مع فلتر: ابقَ إذا الزخم لا يزال قوياً (MACD صاعد + ROC موجب) حتى RSI > 80
-    const rsiExit       = inPosition && (momentumFilter
-      ? (rsi > 80 && !momentumOn)
-      : rsi > 68);
-    const trendExit     = inPosition && !aboveMA && obvTrend === 'falling' && roc20 < -2;
-    const macdFlip      = momentumFilter && inPosition
-      && !macdAbove && roc20 < -1 && rsi < 50; // MACD انقلب سلبي + سعر هابط
+    const stopLoss      = inPosition && close < entryPrice * 0.94;
+    // وقف متحرك: بعد ربح ≥6% عن القمة، اقفل عند تراجع 4% من أعلى قمة لحماية الأرباح
+    const trailingStop  = inPosition && peakPrice >= entryPrice * 1.06 && close < peakPrice * 0.96;
+    const rsiExit       = inPosition && rsi > 72 && !momentumOn;
+    const trendExit      = inPosition && !aboveMA && obvTrend === 'falling' && roc20 < -2;
+    const macdFlip       = inPosition && !macdAbove && roc20 < -1 && rsi < 50; // MACD انقلب سلبي + سعر هابط
 
-    const sellSignal = stopLoss8 || rsiExit || trendExit || macdFlip;
+    const sellSignal = stopLoss || trailingStop || rsiExit || trendExit || macdFlip;
 
     if (buySignal) {
-      shares = cash / close; entryPrice = close; entryDate = times[i]; cash = 0; inPosition = true;
+      shares = cash / close; entryPrice = close; entryDate = times[i]; cash = 0; inPosition = true; peakPrice = close;
     } else if (sellSignal) {
       const profitPct = ((close - entryPrice) / entryPrice) * 100;
-      const reason    = stopLoss8 ? 'وقف_خسارة'
-        : rsiExit   ? 'تشبع_شرائي'
-        : macdFlip  ? 'انعكاس_MACD'
+      const reason    = stopLoss     ? 'وقف_خسارة'
+        : trailingStop ? 'وقف_متحرك_حماية_ربح'
+        : rsiExit      ? 'تشبع_شرائي'
+        : macdFlip     ? 'انعكاس_MACD'
         : 'ضعف_مؤشرات';
       trades.push({
         entry_date:  new Date(entryDate).toISOString().split('T')[0],
@@ -1536,7 +1540,7 @@ function _simulate(closes, volumes, times, macdData, rocArr, initialCapital, mom
         days_held:   Math.round((times[i] - entryDate) / 86400000),
         exit_reason: reason
       });
-      cash = shares * close; shares = 0; inPosition = false;
+      cash = shares * close; shares = 0; inPosition = false; peakPrice = 0;
     }
     const val = inPosition ? shares * close : cash;
     if (i % 2 === 0) equity.push({ time: times[i], value: Math.round(val * 100) / 100 });
