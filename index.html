@@ -597,7 +597,8 @@ async function loadTab(tab) {
     const el = document.getElementById('newsContent');
     el.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>';
     try {
-      const r = await fetch(`/proxy/news/${sym}`);
+      const typeParam = currentType === 'crypto' ? 'crypto' : 'stock';
+      const r = await fetch(`/proxy/news/${sym}?type=${typeParam}`);
       const d = await r.json();
       tabData.news = d;
       tabLoaded.news = true;
@@ -1034,7 +1035,7 @@ function renderNews(d) {
       <a class="news-item" href="${n.url||'#'}" target="_blank" rel="noopener">
         <div class="news-sentiment ${sentClass}"></div>
         <div class="news-content">
-          <div class="news-title">${n.title}</div>
+          <div class="news-title">${n.title_ar || n.title}</div>
           <div class="news-meta">${n.publisher}${ago ? ' · '+ago : ''}</div>
         </div>
       </a>`;

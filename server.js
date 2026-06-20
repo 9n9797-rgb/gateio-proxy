@@ -234,15 +234,43 @@ const calcSentiment = t => Math.max(-2, Math.min(2,
 ));
 
 // ===== دوال داخلية: أخبار / كونغرس / توصية =====
-async function fetchNews(symbol) {
-  // Try Yahoo Finance search API for news
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=8&enableFuzzyQuery=false&quotesCount=0`;
+
+// خريطة الرموز الشائعة للعملات إلى صيغة Yahoo (BTC_USDT -> BTC-USD) لجلب أخبار حقيقية
+function toYahooNewsQuery(symbol, type) {
+  if (type !== 'crypto') return symbol;
+  const base = symbol.replace(/_.*$/, ''); // BTC_USDT -> BTC
+  return `${base}-USD`;
+}
+
+// ترجمة آلية مجانية (MyMemory) — بدون مفتاح، مناسبة لعناوين قصيرة
+async function translateToArabic(text) {
+  if (!text) return text;
+  try {
+    const r = await withTimeout(fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|ar`
+    ), 6000);
+    const j = await r.json();
+    const translated = j?.responseData?.translatedText;
+    return translated && !translated.startsWith('QUERY LENGTH') ? translated : text;
+  } catch (_) {
+    return text;
+  }
+}
+
+async function fetchNews(symbol, type = 'stock') {
+  const query = toYahooNewsQuery(symbol, type);
+  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&newsCount=8&enableFuzzyQuery=false&quotesCount=0`;
   const r = await withTimeout(fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible)', 'Accept': 'application/json' }
   }), 8000);
   const json = await r.json();
-  return (json?.news || []).map(n => ({
+  const items = json?.news || [];
+
+  const titles_ar = await Promise.all(items.map(n => translateToArabic(n.title || '')));
+
+  return items.map((n, i) => ({
     title: n.title || '',
+    title_ar: titles_ar[i] || n.title || '',
     publisher: n.publisher || '',
     published_at: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null,
     url: n.link || '',
@@ -894,10 +922,13 @@ function buildAIScore(closes, highs, lows, opens, volumes, congress, news) {
   else                  { grade='F'; gradeColor='#f85149'; gradeLabel='خطر — إشارات سلبية واضحة'; }
 
   let entrySignal;
-  if      (total >= 65 && close > ma20)          entrySignal = { type:'buy',    label:'✅ دخول مناسب',   desc:'الشروط مهيأة — ادخل بـ 30-50% من المخصص', color:'#3fb950' };
-  else if (total >= 50)                           entrySignal = { type:'watch',  label:'👀 راقب وانتظر', desc:'إشارات محايدة — انتظر تأكيداً إضافياً',    color:'#d29922' };
-  else if (rsi < 32 && obvTrend !== 'falling')    entrySignal = { type:'bounce', label:'🎯 فرصة ارتداد', desc:'تشبع بيعي — قد يرتد بالدفعات التدريجية',   color:'#58a6ff' };
-  else                                            entrySignal = { type:'avoid',  label:'🚫 تجنب الآن',   desc:'مؤشرات ضعيفة — انتظر تحسن الصورة',        color:'#f85149' };
+  if      (total >= 70)                                              entrySignal = { type:'strong_buy', label:'🟢 شراء قوي',        desc:'تقارب إيجابي واضح بين المؤشرات — فرصة دخول قوية', color:'#3fb950' };
+  else if (total >= 55 && (close > ma20 || macdL > macdS || obvTrend === 'rising'))
+                                                                       entrySignal = { type:'buy',        label:'✅ دخول مناسب',      desc:'الشروط مهيأة — ادخل بـ 30-50% من المخصص',          color:'#58c96a' };
+  else if (rsi < 32 && obvTrend !== 'falling')                       entrySignal = { type:'bounce',     label:'🎯 فرصة ارتداد',     desc:'تشبع بيعي — قد يرتد بالدفعات التدريجية',           color:'#58a6ff' };
+  else if (total <= 30 || (rsi > 70 && obvTrend === 'falling'))      entrySignal = { type:'sell',       label:'🔴 بيع / تجنب الدخول', desc:'مؤشرات سلبية واضحة — اخرج أو لا تدخل الآن',        color:'#f85149' };
+  else if (total <= 45)                                              entrySignal = { type:'avoid',      label:'🚫 تجنب الآن',       desc:'مؤشرات ضعيفة — انتظر تحسن الصورة',                color:'#f0883e' };
+  else                                                                entrySignal = { type:'watch',      label:'👀 راقب وانتظر',     desc:'إشارات محايدة — انتظر تأكيداً إضافياً',            color:'#d29922' };
 
   const atrStop   = atr ? Math.round((close - 2.0 * atr) * 100) / 100 : null;
   const atrTarget = atr ? Math.round((close + 3.0 * atr) * 100) / 100 : null;
@@ -1291,11 +1322,12 @@ app.get("/proxy/price/:symbol", async (req, res) => {
   }
 });
 
-// GET /proxy/news/:symbol
+// GET /proxy/news/:symbol?type=stock|crypto
 app.get("/proxy/news/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
+  const type = req.query.type === 'crypto' ? 'crypto' : 'stock';
   try {
-    const news = await memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000);
+    const news = await memoGet(`news_${type}_${symbol}`, () => fetchNews(symbol, type), 10 * 60000);
     res.json({ symbol, count: news.length, news });
   } catch (e) {
     res.json({ symbol, count: 0, news: [], error: String(e) });
@@ -1397,7 +1429,7 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
       type === 'stock'
         ? fetchCongressTrades(symbol, 90)
         : Promise.resolve({ trades: [], buys: 0, sells: 0, total: 0 }),
-      memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000),
+      memoGet(`news_${type}_${symbol}`, () => fetchNews(symbol, type), 10 * 60000),
       type === 'stock'
         ? memoGet(`analysts_${symbol}`, () => fetchAnalystRecs(symbol), 60 * 60000)
         : Promise.resolve(null)
@@ -1721,7 +1753,7 @@ app.get("/proxy/ai/:symbol", async (req, res) => {
       type === 'stock'
         ? fetchCongressTrades(symbol, 90)
         : Promise.resolve({ trades:[], buys:0, sells:0, total:0 }),
-      memoGet(`news_${symbol}`, () => fetchNews(symbol), 10 * 60000)
+      memoGet(`news_${type}_${symbol}`, () => fetchNews(symbol, type), 10 * 60000)
     ]);
     const congress = congressRes.status === 'fulfilled' ? congressRes.value : { trades:[], buys:0, sells:0, total:0 };
     const news     = newsRes.status   === 'fulfilled' ? newsRes.value   : [];
