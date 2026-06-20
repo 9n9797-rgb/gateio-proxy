@@ -21,6 +21,10 @@ services:
         sync: false   # أضفه من لوحة Render → Environment
       - key: GATEIO_API_SECRET
         sync: false   # أضفه من لوحة Render → Environment
+      - key: SESSION_SECRET
+        sync: false   # مفتاح تشفير جلسات تسجيل الدخول — أضفه من لوحة Render → Environment
+      - key: REGISTER_CODE
+        sync: false   # رمز الدعوة المطلوب لإنشاء حساب جديد — أضفه من لوحة Render → Environment
 
     # (اختياري) تحويلات/روابط مختصرة
     routes:
