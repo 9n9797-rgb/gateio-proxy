@@ -50,14 +50,13 @@ let _yahooCookies = '';
 let _yahooCrumbAt = 0;
 const CRUMB_TTL = 6 * 3600000;
 
-let _yahooCrumbDebug = null;
 async function getYahooCrumb() {
   if (_yahooCrumb && Date.now() - _yahooCrumbAt < CRUMB_TTL) return _yahooCrumb;
   try {
     const r1 = await withTimeout(fetch('https://fc.yahoo.com/', {
       redirect: 'manual',
       headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' }
-    }), 5000).catch(e => { _yahooCrumbDebug = `r1 fail: ${e.message}`; return null; });
+    }), 5000).catch(() => null);
     let cookieStr = '';
     if (r1) {
       const rawCookies = typeof r1.headers.getSetCookie === 'function'
@@ -78,10 +77,7 @@ async function getYahooCrumb() {
       _yahooCrumbAt = Date.now();
       return _yahooCrumb;
     }
-    _yahooCrumbDebug = `r1_status=${r1?.status} r2_status=${r2.status} cookieLen=${cookieStr.length} text=${text.slice(0,120)}`;
-  } catch (e) {
-    _yahooCrumbDebug = `exception: ${e.message}`;
-  }
+  } catch (_) {}
   return null;
 }
 
@@ -1608,7 +1604,7 @@ app.get("/proxy/analysts/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   try {
     const data = await memoGet(`analysts_${symbol}`, () => fetchAnalystRecs(symbol), 60 * 60000);
-    if (!data) return res.json({ symbol, error: 'تعذر جلب بيانات المحللين', available: false, debug: _yahooCrumbDebug });
+    if (!data) return res.json({ symbol, error: 'تعذر جلب بيانات المحللين', available: false });
 
     const { total_analysts, strong_buy, buy, hold, sell, strong_sell,
             consensus, consensus_ar, consensus_mean, target_high, target_low,
