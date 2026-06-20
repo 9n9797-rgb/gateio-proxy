@@ -9,6 +9,12 @@ import GateApi from "gate-api";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as autopilot from "./lib/autopilot.js";
+import * as paper from "./lib/portfolio.js";
+import * as strategy from "./lib/strategy.js";
+import * as risk from "./lib/riskManager.js";
+import { readJSON } from "./lib/store.js";
+import { calculateRSI, calculateOBV, getOBVTrend, calculateMA } from "./lib/indicators.js";
 
 dotenv.config();
 
@@ -167,52 +173,7 @@ app.get("/llm-instructions", (req, res) => {
   res.status(404).json({ error: "llm-instructions.md not found" });
 });
 
-// ===== حسابات المؤشرات الفنية =====
-function calculateRSI(closes, period = 14) {
-  if (closes.length < period + 1) return closes.map(() => 50);
-  const result = new Array(period).fill(null);
-  let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const d = closes[i] - closes[i - 1];
-    if (d > 0) gains += d; else losses += Math.abs(d);
-  }
-  let avgGain = gains / period, avgLoss = losses / period;
-  result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-  for (let i = period + 1; i < closes.length; i++) {
-    const d = closes[i] - closes[i - 1];
-    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
-    result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-  }
-  return result;
-}
-
-function calculateOBV(closes, volumes) {
-  const obv = [0];
-  for (let i = 1; i < closes.length; i++) {
-    if (closes[i] > closes[i - 1]) obv.push(obv[i - 1] + volumes[i]);
-    else if (closes[i] < closes[i - 1]) obv.push(obv[i - 1] - volumes[i]);
-    else obv.push(obv[i - 1]);
-  }
-  return obv;
-}
-
-function getOBVTrend(obv) {
-  if (obv.length < 10) return "neutral";
-  const n = obv.length;
-  const recent = obv.slice(n - 5).reduce((a, b) => a + b, 0) / 5;
-  const older  = obv.slice(n - 10, n - 5).reduce((a, b) => a + b, 0) / 5;
-  if (recent > older * 1.005) return "rising";
-  if (recent < older * 0.995) return "falling";
-  return "neutral";
-}
-
-function calculateMA(closes, period = 20) {
-  return closes.map((_, i) => {
-    if (i < period - 1) return null;
-    return closes.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
-  });
-}
+// ===== حسابات المؤشرات الفنية: مستوردة من lib/indicators.js (مشتركة مع الأوتوبايلوت) =====
 
 // ===== تحليل التجميع =====
 app.get("/proxy/analyze/:pair", async (req, res) => {
@@ -309,6 +270,80 @@ app.get("/proxy/pairs", async (req, res) => {
     res.status(200).json(upstreamError(e));
   }
 });
+
+// ===== الأوتوبايلوت: التداول الآلي بالذكاء الصناعي =====
+autopilot.init(spotApi);
+
+// حالة الأوتوبايلوت الحالية
+app.get("/autopilot/status", (req, res) => {
+  const state = autopilot.getState();
+  const wallet = paper.getPortfolio();
+  res.json({
+    mode: state.mode,
+    pairs: state.pairs,
+    cycles_run: state.cyclesRun,
+    last_run_at: state.lastRunAt,
+    last_error: state.lastError,
+    live_positions: state.livePositions,
+    paper_positions: wallet.positions,
+    risk_config: risk.getRiskConfig()
+  });
+});
+
+// تغيير وضع التشغيل: off | signal | paper | live
+app.post("/autopilot/mode", (req, res) => {
+  try {
+    const state = autopilot.setMode(req.body.mode);
+    res.json({ ok: true, mode: state.mode });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// تحديث قائمة الأزواج المتابَعة
+app.post("/autopilot/pairs", (req, res) => {
+  const pairs = Array.isArray(req.body.pairs) ? req.body.pairs : [];
+  if (!pairs.length) return res.status(400).json({ ok: false, error: "pairs مطلوبة" });
+  const state = autopilot.setPairs(pairs);
+  res.json({ ok: true, pairs: state.pairs });
+});
+
+// سجل الصفقات المغلقة (حقيقية وتجريبية)
+app.get("/autopilot/trades", (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+  const journal = readJSON("trade-journal", []);
+  res.json(journal.slice(-limit).reverse());
+});
+
+// محفظة التداول الوهمي (Paper Trading) لتطوير الذكاء الصناعي بدون مخاطرة
+app.get("/autopilot/portfolio", (req, res) => {
+  const wallet = paper.getPortfolio();
+  res.json({
+    cash: wallet.cash,
+    positions: wallet.positions,
+    realized_pnl: wallet.realizedPnl,
+    equity: paper.equity(wallet, {}),
+    created_at: wallet.createdAt
+  });
+});
+
+// إعادة تصفير المحفظة الوهمية للبدء من جديد
+app.post("/autopilot/portfolio/reset", (req, res) => {
+  const wallet = paper.resetPortfolio();
+  res.json({ ok: true, wallet });
+});
+
+// أوزان المؤشرات التي تعلّمها النظام من نتائج الصفقات السابقة
+app.get("/autopilot/weights", (req, res) => {
+  res.json(strategy.getWeights());
+});
+
+app.post("/autopilot/weights/reset", (req, res) => {
+  res.json(strategy.resetWeights());
+});
+
+// استئناف الأوتوبايلوت تلقائياً إذا كان يعمل قبل آخر إعادة تشغيل للخادم
+autopilot.bootstrapFromSavedState();
 
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
