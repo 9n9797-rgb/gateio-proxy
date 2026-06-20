@@ -90,25 +90,16 @@ async function fetchYahooQuoteSummary(symbol, modules) {
   if (!crumb) return null;
   const moduleStr = Array.isArray(modules) ? modules.join(',') : modules;
   const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${encodeURIComponent(moduleStr)}&crumb=${encodeURIComponent(crumb)}`;
-  try {
-    const r = await withTimeout(fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        ...((_yahooCookies) ? { 'Cookie': _yahooCookies } : {})
-      }
-    }), 8000);
-    const bodyText = await r.text();
-    if (!r.ok) {
-      _yahooCrumbDebug = `quoteSummary status=${r.status} body=${bodyText.slice(0,150)}`;
-      return null;
+  const r = await withTimeout(fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      ...((_yahooCookies) ? { 'Cookie': _yahooCookies } : {})
     }
-    const json = JSON.parse(bodyText);
-    return json?.quoteSummary?.result?.[0] || null;
-  } catch (e) {
-    _yahooCrumbDebug = `quoteSummary exception: ${e.message}`;
-    return null;
-  }
+  }), 8000);
+  if (!r.ok) return null;
+  const json = await r.json();
+  return json?.quoteSummary?.result?.[0] || null;
 }
 
 async function fetchAnalystRecs(symbol) {
