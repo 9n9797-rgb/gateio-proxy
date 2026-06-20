@@ -14,13 +14,40 @@ services:
     healthCheckIntervalSeconds: 10
     healthCheckTimeoutSeconds: 5
 
+    # قرص دائم لقاعدة بيانات SQLite (بدونه تُفقد بيانات المستخدمين عند كل إعادة نشر)
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+
     envVars:
       - key: NODE_ENV
         value: "production"
+      # القديمة (اختيارية، فقط لنقاط /proxy/* أحادية المستخدم)
       - key: GATEIO_API_KEY
-        sync: false   # أضفه من لوحة Render → Environment
+        sync: false
       - key: GATEIO_API_SECRET
-        sync: false   # أضفه من لوحة Render → Environment
+        sync: false
+      # إلزامي لتشفير مفاتيح Gate.io لكل مستخدم — أنشئه بـ: openssl rand -hex 32
+      - key: APP_ENCRYPTION_KEY
+        sync: false
+      # بريد إرسال رمز الدخول (اختياري؛ بدونه يُطبع الرمز في السجلات فقط — غير مناسب للإنتاج)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # الذكاء الصناعي الاختياري (LLM) فوق المحرك الكمّي
+      - key: OPENAI_API_KEY
+        sync: false
+      # حماية إلزامية: التداول الحقيقي يبقى معطّلاً ما لم تُفعّله عمداً
+      - key: AUTOPILOT_ALLOW_LIVE
+        value: "false"
 
     # (اختياري) تحويلات/روابط مختصرة
     routes:

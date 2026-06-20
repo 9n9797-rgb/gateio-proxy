@@ -1,0 +1,15 @@
+[Unit]
+Description=Gate.io AI Trading Autopilot
+After=network.target
+
+[Service]
+Type=simple
+User=gateio
+WorkingDirectory=/opt/gateio-autopilot
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/gateio-autopilot/.env
+
+[Install]
+WantedBy=multi-user.target

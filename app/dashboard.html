@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>الرئيسية — Gate.io Autopilot</title>
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+
+<div class="header">
+  <span></span>
+  <h1>الرئيسية</h1>
+  <span class="btn-icon" onclick="load()">↻</span>
+</div>
+
+<div class="page" id="content">
+  <div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>
+</div>
+
+<script src="/app/app.js"></script>
+<script>
+requireAuthPage();
+navBar("dashboard");
+
+async function load() {
+  const content = document.getElementById("content");
+  content.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>';
+
+  try {
+    const [status, wallet, weights, recs, trades] = await Promise.all([
+      API.req("/autopilot/status"),
+      API.req("/autopilot/portfolio"),
+      API.req("/autopilot/weights"),
+      API.req("/autopilot/recommendations?status=pending"),
+      API.req("/autopilot/trades?limit=8")
+    ]);
+    render(status, wallet, weights, recs, trades);
+  } catch (e) {
+    content.innerHTML = `<div class="state">❌<br><br>${e.message}</div>`;
+  }
+}
+
+function render(status, wallet, weights, recs, trades) {
+  const execLabel = { off: "متوقف", paper: "محفظة وهمية", live: "حساب حقيقي" }[status.execution] || status.execution;
+  const modeLabel = { recommend_only: "توصيات فقط", auto: "تداول تلقائي" }[status.decision_mode] || status.decision_mode;
+  const execBadge = status.execution === "off" ? "badge-yellow" : status.execution === "live" ? "badge-red" : "badge-blue";
+
+  const paperPositions = Object.entries(wallet.positions || {});
+  const livePositions = status.live_positions || [];
+
+  document.getElementById("content").innerHTML = `
+    <div class="card flex-between">
+      <div>
+        <div style="font-size:13px;color:var(--muted)">وضع التنفيذ</div>
+        <div class="badge ${execBadge}" style="margin-top:4px;font-size:14px">${execLabel}</div>
+      </div>
+      <div style="text-align:left">
+        <div style="font-size:13px;color:var(--muted)">القرار</div>
+        <div style="font-size:14px;font-weight:600;margin-top:4px">${modeLabel}</div>
+      </div>
+    </div>
+
+    <div class="cards mt">
+      <div class="metric-card">
+        <div class="metric-label">سيولة المحفظة الوهمية</div>
+        <div class="metric-value">$${formatNum(wallet.cash)}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">إجمالي القيمة</div>
+        <div class="metric-value">$${formatNum(wallet.equity)}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">ربح/خسارة محقّق</div>
+        <div class="metric-value" style="color:${wallet.realized_pnl >= 0 ? 'var(--green)' : 'var(--red)'}">
+          ${wallet.realized_pnl >= 0 ? '+' : ''}$${formatNum(wallet.realized_pnl)}
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">التوصيات المعلّقة (${recs.length})</div>
+    ${recs.length === 0 ? '<div class="card center muted" style="padding:20px">لا توجد توصيات معلّقة حالياً</div>' :
+      recs.map(r => `
+        <div class="list-item">
+          <div>
+            <div class="li-main">${r.pair} — <span class="badge ${r.action === 'BUY' ? 'badge-green' : 'badge-red'}">${r.action === 'BUY' ? 'شراء' : 'بيع'}</span></div>
+            <div class="li-sub">السعر $${formatNum(r.price)} • الدرجة ${r.score} • ${r.engine === 'llm' ? 'بمساعدة AI' : 'كمّي'}</div>
+            ${r.ai_reason ? `<div class="li-sub">${r.ai_reason}</div>` : ''}
+          </div>
+          <div class="li-actions">
+            <button class="btn btn-green btn-sm" onclick="execRec(${r.id})">تنفيذ</button>
+            <button class="btn btn-ghost btn-sm" onclick="dismissRec(${r.id})">تجاهل</button>
+          </div>
+        </div>
+      `).join("")
+    }
+
+    <div class="section-title">المراكز المفتوحة (وهمية)</div>
+    ${paperPositions.length === 0 ? '<div class="card center muted" style="padding:20px">لا توجد مراكز مفتوحة</div>' :
+      paperPositions.map(([pair, p]) => `
+        <div class="list-item">
+          <div>
+            <div class="li-main">${pair}</div>
+            <div class="li-sub">الكمية ${formatNum(p.qty)} • دخول $${formatNum(p.entryPrice)}</div>
+          </div>
+          <div class="li-sub">SL $${formatNum(p.stopLossPrice)} / TP $${formatNum(p.takeProfitPrice)}</div>
+        </div>
+      `).join("")
+    }
+
+    ${livePositions.length ? `
+      <div class="section-title">المراكز المفتوحة (حقيقية)</div>
+      ${livePositions.map(p => `
+        <div class="list-item">
+          <div>
+            <div class="li-main">${p.pair}</div>
+            <div class="li-sub">الكمية ${formatNum(p.qty)} • دخول $${formatNum(p.entry_price)}</div>
+          </div>
+          <div class="li-sub">SL $${formatNum(p.stop_loss_price)} / TP $${formatNum(p.take_profit_price)}</div>
+        </div>
+      `).join("")}
+    ` : ""}
+
+    <div class="section-title">أوزان المؤشرات المتعلَّمة</div>
+    <div class="card">
+      ${Object.entries(weights).map(([k, v]) => `
+        <div class="flex-between" style="margin-bottom:8px">
+          <span style="font-size:13px">${({rsi:'RSI', macd:'MACD', trend:'الاتجاه', obv:'OBV'})[k] || k}</span>
+          <span class="badge ${v >= 1 ? 'badge-green' : 'badge-red'}">${v.toFixed(2)}</span>
+        </div>
+      `).join("")}
+    </div>
+
+    <div class="section-title">آخر الصفقات</div>
+    ${trades.length === 0 ? '<div class="card center muted" style="padding:20px">لا توجد صفقات حتى الآن</div>' :
+      trades.map(t => `
+        <div class="list-item">
+          <div>
+            <div class="li-main">${t.pair}</div>
+            <div class="li-sub">${t.reason} • ${t.mode}</div>
+          </div>
+          <div class="badge ${t.pnl_pct >= 0 ? 'badge-green' : 'badge-red'}">${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct}%</div>
+        </div>
+      `).join("")
+    }
+  `;
+}
+
+async function execRec(id) {
+  try {
+    await API.req(`/autopilot/recommendations/${id}/execute`, { method: "POST" });
+    showToast("تم تنفيذ التوصية", "success");
+    load();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+async function dismissRec(id) {
+  try {
+    await API.req(`/autopilot/recommendations/${id}/dismiss`, { method: "POST" });
+    showToast("تم تجاهل التوصية");
+    load();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+load();
+</script>
+</body>
+</html>

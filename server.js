@@ -9,6 +9,15 @@ import GateApi from "gate-api";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as autopilot from "./lib/autopilot.js";
+import * as paper from "./lib/portfolio.js";
+import * as strategy from "./lib/strategy.js";
+import * as risk from "./lib/riskManager.js";
+import { calculateRSI, calculateOBV, getOBVTrend, calculateMA } from "./lib/indicators.js";
+import db from "./lib/db.js";
+import { requestLoginCode, verifyLoginCode, requireAuth, logout } from "./lib/auth.js";
+import { setKeys, removeKeys, hasKeys } from "./lib/exchangeKeys.js";
+import { executeRecommendation, dismissRecommendation, analyzePair, analyzeAndExecute } from "./lib/autopilot.js";
 
 dotenv.config();
 
@@ -167,52 +176,7 @@ app.get("/llm-instructions", (req, res) => {
   res.status(404).json({ error: "llm-instructions.md not found" });
 });
 
-// ===== حسابات المؤشرات الفنية =====
-function calculateRSI(closes, period = 14) {
-  if (closes.length < period + 1) return closes.map(() => 50);
-  const result = new Array(period).fill(null);
-  let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const d = closes[i] - closes[i - 1];
-    if (d > 0) gains += d; else losses += Math.abs(d);
-  }
-  let avgGain = gains / period, avgLoss = losses / period;
-  result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-  for (let i = period + 1; i < closes.length; i++) {
-    const d = closes[i] - closes[i - 1];
-    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
-    result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-  }
-  return result;
-}
-
-function calculateOBV(closes, volumes) {
-  const obv = [0];
-  for (let i = 1; i < closes.length; i++) {
-    if (closes[i] > closes[i - 1]) obv.push(obv[i - 1] + volumes[i]);
-    else if (closes[i] < closes[i - 1]) obv.push(obv[i - 1] - volumes[i]);
-    else obv.push(obv[i - 1]);
-  }
-  return obv;
-}
-
-function getOBVTrend(obv) {
-  if (obv.length < 10) return "neutral";
-  const n = obv.length;
-  const recent = obv.slice(n - 5).reduce((a, b) => a + b, 0) / 5;
-  const older  = obv.slice(n - 10, n - 5).reduce((a, b) => a + b, 0) / 5;
-  if (recent > older * 1.005) return "rising";
-  if (recent < older * 0.995) return "falling";
-  return "neutral";
-}
-
-function calculateMA(closes, period = 20) {
-  return closes.map((_, i) => {
-    if (i < period - 1) return null;
-    return closes.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
-  });
-}
+// ===== حسابات المؤشرات الفنية: مستوردة من lib/indicators.js (مشتركة مع الأوتوبايلوت) =====
 
 // ===== تحليل التجميع =====
 app.get("/proxy/analyze/:pair", async (req, res) => {
@@ -309,6 +273,198 @@ app.get("/proxy/pairs", async (req, res) => {
     res.status(200).json(upstreamError(e));
   }
 });
+
+// ===== تسجيل الدخول بدون كلمة مرور (رمز يُرسل للبريد) =====
+app.post("/auth/request-code", async (req, res) => {
+  try {
+    await requestLoginCode(req.body.email);
+    res.json({ ok: true, message: "تم إرسال رمز الدخول إلى بريدك" });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/auth/verify-code", (req, res) => {
+  try {
+    const result = verifyLoginCode(req.body.email, req.body.code);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/auth/logout", requireAuth, (req, res) => {
+  logout(req.headers.authorization.slice(7));
+  res.json({ ok: true });
+});
+
+app.get("/account/me", requireAuth, (req, res) => {
+  res.json({ id: req.user.id, email: req.user.email, has_exchange_keys: hasKeys(req.user.id) });
+});
+
+// ===== ربط/فك ربط مفاتيح Gate.io الخاصة بالمستخدم (تُشفّر قبل الحفظ) =====
+app.post("/account/exchange-keys", requireAuth, (req, res) => {
+  try {
+    setKeys(req.user.id, req.body.api_key, req.body.api_secret);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.delete("/account/exchange-keys", requireAuth, (req, res) => {
+  removeKeys(req.user.id);
+  res.json({ ok: true });
+});
+
+app.get("/account/exchange-keys/status", requireAuth, (req, res) => {
+  res.json({ connected: hasKeys(req.user.id) });
+});
+
+// ===== الأوتوبايلوت: التداول الآلي بالذكاء الصناعي (لكل مستخدم بياناته الخاصة) =====
+
+function getUserSettings(userId) {
+  const row = db.prepare("SELECT * FROM user_settings WHERE user_id = ?").get(userId);
+  return {
+    execution: row.execution,
+    decision_mode: row.decision_mode,
+    pairs: (row.pairs || "").split(",").map(s => s.trim()).filter(Boolean)
+  };
+}
+
+app.get("/autopilot/status", requireAuth, (req, res) => {
+  const settings = getUserSettings(req.user.id);
+  const wallet = paper.getPortfolio(req.user.id);
+  const livePositions = db.prepare("SELECT * FROM live_positions WHERE user_id = ?").all(req.user.id);
+  res.json({
+    execution: settings.execution,
+    decision_mode: settings.decision_mode,
+    pairs: settings.pairs,
+    has_exchange_keys: hasKeys(req.user.id),
+    paper_positions: wallet.positions,
+    live_positions: livePositions,
+    risk_config: risk.getRiskConfig()
+  });
+});
+
+// تحديث إعدادات الأوتوبايلوت: وضع التنفيذ والقرار والأزواج المتابَعة
+app.post("/autopilot/settings", requireAuth, (req, res) => {
+  const { execution, decision_mode, pairs } = req.body;
+  if (execution && !["off", "paper", "live"].includes(execution)) {
+    return res.status(400).json({ ok: false, error: "execution غير صالح" });
+  }
+  if (execution === "live" && process.env.AUTOPILOT_ALLOW_LIVE !== "true") {
+    return res.status(400).json({ ok: false, error: "التداول الحقيقي معطّل على هذا الخادم (AUTOPILOT_ALLOW_LIVE)" });
+  }
+  if (execution === "live" && !hasKeys(req.user.id)) {
+    return res.status(400).json({ ok: false, error: "اربط مفاتيح Gate.io أولاً من /account/exchange-keys" });
+  }
+  if (decision_mode && !["auto", "recommend_only"].includes(decision_mode)) {
+    return res.status(400).json({ ok: false, error: "decision_mode غير صالح" });
+  }
+
+  const current = getUserSettings(req.user.id);
+  const next = {
+    execution: execution ?? current.execution,
+    decision_mode: decision_mode ?? current.decision_mode,
+    pairs: Array.isArray(pairs) && pairs.length ? pairs.join(",") : current.pairs.join(",")
+  };
+  db.prepare(
+    "UPDATE user_settings SET execution = ?, decision_mode = ?, pairs = ? WHERE user_id = ?"
+  ).run(next.execution, next.decision_mode, next.pairs, req.user.id);
+
+  res.json({ ok: true, settings: getUserSettings(req.user.id) });
+});
+
+// سجل الصفقات المغلقة (حقيقية وتجريبية)
+app.get("/autopilot/trades", requireAuth, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+  const rows = db
+    .prepare("SELECT * FROM trades WHERE user_id = ? ORDER BY id DESC LIMIT ?")
+    .all(req.user.id, limit);
+  res.json(rows.map(r => ({ ...r, votes: r.votes ? JSON.parse(r.votes) : {} })));
+});
+
+// التوصيات المعلّقة (لمن اختار وضع "توصيات فقط")
+app.get("/autopilot/recommendations", requireAuth, (req, res) => {
+  const status = req.query.status || "pending";
+  const rows = db
+    .prepare("SELECT * FROM recommendations WHERE user_id = ? AND status = ? ORDER BY id DESC LIMIT 100")
+    .all(req.user.id, status);
+  res.json(rows.map(r => ({ ...r, votes: r.votes ? JSON.parse(r.votes) : {} })));
+});
+
+app.post("/autopilot/recommendations/:id/execute", requireAuth, async (req, res) => {
+  try {
+    await executeRecommendation(req.user.id, Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/autopilot/recommendations/:id/dismiss", requireAuth, (req, res) => {
+  try {
+    dismissRecommendation(req.user.id, Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// محفظة التداول الوهمي (Paper Trading) لتطوير الذكاء الصناعي بدون مخاطرة
+app.get("/autopilot/portfolio", requireAuth, (req, res) => {
+  const wallet = paper.getPortfolio(req.user.id);
+  res.json({
+    cash: wallet.cash,
+    positions: wallet.positions,
+    realized_pnl: wallet.realizedPnl,
+    equity: paper.equity(wallet, {}),
+    created_at: wallet.createdAt
+  });
+});
+
+// إعادة تصفير المحفظة الوهمية للبدء من جديد
+app.post("/autopilot/portfolio/reset", requireAuth, (req, res) => {
+  const wallet = paper.resetPortfolio(req.user.id);
+  res.json({ ok: true, wallet });
+});
+
+// أوزان المؤشرات التي تعلّمها النظام من نتائج صفقات هذا المستخدم
+app.get("/autopilot/weights", requireAuth, (req, res) => {
+  res.json(strategy.getWeights(req.user.id));
+});
+
+app.post("/autopilot/weights/reset", requireAuth, (req, res) => {
+  res.json(strategy.resetWeights(req.user.id));
+});
+
+// تحليل كامل شخصي لزوج معيّن (يستخدم أوزان وتعلّم هذا المستخدم) — صفحة التحليل بالواجهة
+app.get("/autopilot/analyze/:pair", requireAuth, async (req, res) => {
+  const pair = req.params.pair.toUpperCase();
+  const interval = req.query.interval || "15m";
+  try {
+    const result = await analyzePair(req.user.id, pair, interval);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// تحليل فوري + تنفيذ مباشر بقرار المستخدم (يفتح/يغلق مركز حسب وضع paper/live الحالي)
+app.post("/autopilot/analyze/:pair/execute", requireAuth, async (req, res) => {
+  const pair = req.params.pair.toUpperCase();
+  const interval = req.query.interval || "15m";
+  try {
+    const result = await analyzeAndExecute(req.user.id, pair, interval);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// تشغيل حلقة الأوتوبايلوت (تفحص كل المستخدمين النشطين دورياً)
+autopilot.startLoop();
 
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
