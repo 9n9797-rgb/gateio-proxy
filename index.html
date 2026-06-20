@@ -316,6 +316,10 @@
 </div>
 
 <div id="tabScan" class="tab-panel">
+  <div class="type-toggle" style="margin-bottom:10px">
+    <div class="type-btn active" id="scanBtnStocks" onclick="setScanType('stock')">أسهم</div>
+    <div class="type-btn" id="scanBtnCrypto" onclick="setScanType('crypto')">عملات</div>
+  </div>
   <div id="scanContent" class="state"><div>اضغط "فحص السوق" لإيجاد أفضل الفرص</div></div>
 </div>
 
@@ -803,11 +807,11 @@ function renderAnalysis(d) {
 // ============================================================
 const REC_COLORS = {
   STRONG_BUY:'#3fb950', BUY:'#58c96a', HOLD:'#d29922',
-  WATCH:'#8b949e', SELL:'#f0883e', STRONG_SELL:'#f85149'
+  WATCH:'#8b949e', SELL:'#f0883e', STRONG_SELL:'#f85149', AVOID_PUMP:'#f85149'
 };
 const REC_BG = {
   STRONG_BUY:'#0d2a14', BUY:'#0d2a14', HOLD:'#2a1a0a',
-  WATCH:'#1c2128', SELL:'#2a1a0a', STRONG_SELL:'#2a0d0d'
+  WATCH:'#1c2128', SELL:'#2a1a0a', STRONG_SELL:'#2a0d0d', AVOID_PUMP:'#2a0d0d'
 };
 
 function renderRecommend(d) {
@@ -851,7 +855,13 @@ function renderRecommend(d) {
       <div class="target-value" style="color:var(--muted)">لا توصية بالدخول</div>
     </div>`;
 
+  const pumpHtml = d.pump_risk?.risk ? `
+    <div style="background:#2a0d0d;border:1px solid #6a2020;color:#f85149;border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:12px;line-height:1.6">
+      ${d.pump_risk.reason}
+    </div>` : '';
+
   document.getElementById('recommendContent').innerHTML = `
+    ${pumpHtml}
     <div class="rec-badge">
       <div class="rec-pill" style="color:${color};background:${bg}">${d.recommendation_ar||d.recommendation}</div>
       <div class="rec-date">${d.date||''} · نقاط الثقة</div>
@@ -1427,6 +1437,11 @@ function renderAI(d) {
       <div style="font-size:11px;color:var(--muted);margin-top:3px">${d.symbol||currentSym} · ${prefix}${fmt(d.current_price)}</div>
     </div>
 
+    ${d.pump_risk?.risk && d.pump_risk.severity === 'medium' ? `
+    <div style="margin:0 16px 10px;background:#2a1f0a;border:1px solid #7a5400;color:#d29922;border-radius:10px;padding:9px 12px;font-size:11px;line-height:1.6">
+      ${d.pump_risk.reason}
+    </div>` : ''}
+
     <div style="margin:0 16px 12px;background:${(d.entry_signal?.color||'#8b949e')}22;border:1px solid ${d.entry_signal?.color||'#8b949e'};border-radius:12px;padding:12px 16px">
       <div style="font-size:16px;font-weight:700;color:${d.entry_signal?.color}">${d.entry_signal?.label||''}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:4px">${d.entry_signal?.desc||''}</div>
@@ -1545,12 +1560,27 @@ function buildAIChart(d) {
 // ============================================================
 // Scan tab
 // ============================================================
+let scanType = 'stock';
+
+function setScanType(type) {
+  if (scanType === type) return;
+  scanType = type;
+  document.getElementById('scanBtnStocks').classList.toggle('active', type === 'stock');
+  document.getElementById('scanBtnCrypto').classList.toggle('active', type === 'crypto');
+  tabLoaded.scan = false;
+  runScan(true);
+}
+
 async function runScan(force = false) {
   if (tabLoaded.scan && !force) return;
   const el = document.getElementById('scanContent');
-  el.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري فحص 25 سهم أمريكي…<br><span style="font-size:12px;color:var(--muted)">يستغرق 10-15 ثانية في أول مرة</span></div></div>';
+  const loadingMsg = scanType === 'crypto'
+    ? 'جاري فحص أعلى العملات سيولة (مع استثناء الشتركوين/البمب تلقائياً)…'
+    : 'جاري فحص 25 سهم أمريكي…';
+  el.innerHTML = `<div class="state"><div class="spinner"></div><div>${loadingMsg}<br><span style="font-size:12px;color:var(--muted)">يستغرق 10-15 ثانية في أول مرة</span></div></div>`;
   try {
-    const r = await fetch('/proxy/scan?top=5');
+    const url = scanType === 'crypto' ? '/proxy/scan/crypto?top=5' : '/proxy/scan?top=5';
+    const r = await fetch(url);
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     tabData.scan = d;
@@ -1570,6 +1600,7 @@ function renderScan(d) {
   const ago = d.ts ? Math.round((Date.now() - d.ts) / 60000) : 0;
   const agoStr = ago < 1 ? 'الآن' : `منذ ${ago} دقيقة`;
 
+  const pfx = scanType === 'crypto' ? '' : '$';
   const cards = d.top.map((s, idx) => {
     const uColor = s.upside_pct >= 40 ? 'var(--green)' : s.upside_pct >= 20 ? 'var(--blue)' : 'var(--yellow)';
     const gradeStyle = `background:${s.grade_color}22;color:${s.grade_color}`;
@@ -1578,8 +1609,8 @@ function renderScan(d) {
     const bsColor    = s.breakout_score >= 70 ? 'var(--green)' : s.breakout_score >= 45 ? 'var(--yellow)' : 'var(--red)';
     const reasHtml   = (s.reasons || []).map(r => `<div class="scan-reason">${r}</div>`).join('');
     const entryLbl   = s.entry_signal?.label ?? '—';
-    const stop   = s.atr_stop   ? `$${fmt(s.atr_stop)}`   : '—';
-    const target = s.atr_target ? `$${fmt(s.atr_target)}` : '—';
+    const stop   = s.atr_stop   ? `${pfx}${fmt(s.atr_stop)}`   : '—';
+    const target = s.atr_target ? `${pfx}${fmt(s.atr_target)}` : '—';
     const rr     = s.atr_rr    ? s.atr_rr                : '—';
     const medal  = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx+1}`;
     return `
@@ -1587,7 +1618,7 @@ function renderScan(d) {
   <div class="scan-card-header">
     <div>
       <div class="scan-sym">${medal} ${s.symbol}</div>
-      <div class="scan-price">$${fmt(s.price)}</div>
+      <div class="scan-price">${pfx}${fmt(s.price)}</div>
     </div>
     <div style="flex:1"></div>
     <div>
@@ -1602,7 +1633,7 @@ function renderScan(d) {
       <div class="scan-upside" style="color:${uColor}">+${s.upside_pct}%</div>
       <div style="font-size:11px;color:var(--muted);padding-bottom:4px">هدف مقدر</div>
     </div>
-    <div class="scan-upside-sub">الهدف: $${fmt(s.period_high)} (أعلى 6 أشهر)</div>
+    <div class="scan-upside-sub">الهدف: ${pfx}${fmt(s.period_high)} (أعلى 6 أشهر)</div>
 
     <div class="scan-scores">
       <div class="scan-score-box">
@@ -1655,8 +1686,8 @@ function renderScan(d) {
   el.innerHTML = `
 <div class="scan-header">
   <div>
-    <div style="font-size:14px;font-weight:600">أفضل ${d.top.length} فرص من ${d.found}/${d.scanned} سهم</div>
-    <div class="scan-meta">آخر تحديث: ${agoStr}</div>
+    <div style="font-size:14px;font-weight:600">أفضل ${d.top.length} فرص من ${d.found}/${d.scanned} ${scanType === 'crypto' ? 'عملة' : 'سهم'}</div>
+    <div class="scan-meta">آخر تحديث: ${agoStr}${scanType === 'crypto' && d.excluded_low_quality ? ` · استُثني ${d.excluded_low_quality} عملة ضعيفة السيولة/مضاربية` : ''}</div>
   </div>
   <button class="scan-refresh" onclick="tabLoaded.scan=false;runScan(true)">🔄 تحديث</button>
 </div>
@@ -1666,9 +1697,9 @@ ${cards}`;
 function openFromScan(sym) {
   currentSym = sym;
   document.getElementById('symInput').value = sym;
-  currentType = 'stock';
-  document.getElementById('btnStocks').classList.add('active');
-  document.getElementById('btnCrypto').classList.remove('active');
+  currentType = scanType;
+  document.getElementById('btnStocks').classList.toggle('active', scanType === 'stock');
+  document.getElementById('btnCrypto').classList.toggle('active', scanType === 'crypto');
   tabLoaded = { analysis: false, recommend: false, congress: false, news: false, backtest: false, ai: false, scan: tabLoaded.scan };
   tabData = { analysis: null, recommend: null, congress: null, news: null, backtest: null, ai: null, scan: tabData.scan };
   switchTab('ai');

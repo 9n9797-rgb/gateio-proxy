@@ -831,6 +831,48 @@ function detectVolumeSpikes(volumes, closes) {
   return out;
 }
 
+// === كشف مخاطر عملات "البمب أند دمب" (شتركوين) ===
+// يعتمد على حركة السعر غير الطبيعية (تغيّر حاد خلال 24س/3 أيام) مقارنة بالسيولة الفعلية
+// (حجم التداول بالدولار) — تحرك ضخم مع سيولة ضعيفة هو النمط الكلاسيكي لعملات البمب
+const STABLECOIN_BASES = new Set(['USDT','USDC','DAI','TUSD','BUSD','FDUSD','USDD','PYUSD','EURT','USDE','USDP']);
+
+function detectPumpRisk(closes, volumes) {
+  const n = closes.length;
+  if (n < 8) return { risk: false };
+  const last = n - 1;
+  const change1d = ((closes[last] - closes[last - 1]) / closes[last - 1]) * 100;
+  const change3d = ((closes[last] - closes[last - 3]) / closes[last - 3]) * 100;
+  const quoteVol24h = (volumes[last] || 0) * (closes[last] || 0);
+
+  let severity = null;
+  if (Math.abs(change1d) >= 60 || Math.abs(change3d) >= 100) {
+    severity = 'extreme';
+  } else if ((Math.abs(change1d) >= 35 || Math.abs(change3d) >= 60) && quoteVol24h < 5_000_000) {
+    severity = 'high';
+  } else if (Math.abs(change1d) >= 35 || Math.abs(change3d) >= 60) {
+    severity = 'medium';
+  } else if (Math.abs(change1d) >= 20 && quoteVol24h < 1_000_000) {
+    severity = 'medium';
+  }
+
+  if (!severity) return { risk: false };
+  const dir = change1d >= 0 ? '+' : '';
+  const reason = severity === 'extreme'
+    ? `⚠️ تحرك سعري غير طبيعي (${dir}${change1d.toFixed(1)}% خلال 24 ساعة) — نمط نموذجي لعملات البمب أند دمب (Shitcoin)، يُنصح بتجنبها تماماً`
+    : severity === 'high'
+      ? `⚠️ تحرك حاد (${dir}${change1d.toFixed(1)}%) مع سيولة منخفضة جداً (${(quoteVol24h / 1e6).toFixed(1)}م$) — خطر مضاربة عالٍ`
+      : `⚠️ تقلب أعلى من الطبيعي (${dir}${change1d.toFixed(1)}% خلال 24 ساعة) — تعامل بحذر`;
+
+  return {
+    risk: true,
+    severity,
+    change_1d: Math.round(change1d * 100) / 100,
+    change_3d: Math.round(change3d * 100) / 100,
+    quote_volume_24h: Math.round(quoteVol24h),
+    reason
+  };
+}
+
 // === AI Score Engine (0-100) ===
 function buildAIScore(closes, highs, lows, opens, volumes, congress, news) {
   const n = closes.length;
@@ -1092,6 +1134,99 @@ app.get('/proxy/scan', async (req, res) => {
   }, 30 * 60000)  // cache 30 min
   .then(d => res.json(d))
   .catch(e => res.json(upstreamError(e)));
+});
+
+// ===== مسح سوق العملات الرقمية — يستثني عملات الشتركوين/البمب تلقائياً =====
+app.get("/proxy/scan/crypto", async (req, res) => {
+  const top = Math.min(parseInt(req.query.top) || 5, 10);
+  const cacheKey = "market_scan_crypto";
+
+  return memoGet(cacheKey, async () => {
+    // 1) جلب كل أزواج USDT دفعة واحدة، وتصفية الجودة الأولية قبل أي تحليل فني
+    const tr = await withTimeout(fetch("https://api.gateio.ws/api/v4/spot/tickers"), 10000);
+    const allTickers = await tr.json();
+    if (!Array.isArray(allTickers)) throw new Error("تعذر جلب قائمة العملات من Gate.io");
+
+    const MIN_QUOTE_VOLUME_24H = 3_000_000; // استثناء العملات الضعيفة السيولة (مرشّح شتركوين أساسي)
+    const candidates = allTickers
+      .filter(t => {
+        const pair = t.currency_pair || "";
+        if (!pair.endsWith("_USDT")) return false;
+        const base = pair.replace("_USDT", "");
+        if (STABLECOIN_BASES.has(base)) return false;
+        const quoteVol = parseFloat(t.quote_volume) || 0;
+        if (quoteVol < MIN_QUOTE_VOLUME_24H) return false;
+        const changePct = parseFloat(t.change_percentage) || 0;
+        if (Math.abs(changePct) >= 35) return false; // استثناء تحركات البمب الواضحة فوراً
+        return true;
+      })
+      .sort((a, b) => (parseFloat(b.quote_volume) || 0) - (parseFloat(a.quote_volume) || 0))
+      .slice(0, 30); // تحليل فني كامل فقط لأعلى 30 عملة سيولة بعد التصفية
+
+    const scanOne = async (t) => {
+      try {
+        const pair = t.currency_pair;
+        const url  = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=90`;
+        const r    = await withTimeout(fetch(url), 10000);
+        const raw  = await r.json();
+        if (!Array.isArray(raw) || raw.length < 30) return null;
+        const closes  = raw.map(c => parseFloat(c[2]));
+        const highs   = raw.map(c => parseFloat(c[3]));
+        const lows    = raw.map(c => parseFloat(c[4]));
+        const opens   = raw.map(c => parseFloat(c[5]));
+        const volumes = raw.map(c => parseFloat(c[1]));
+
+        // فحص ثانٍ بالبيانات التاريخية الفعلية (أدق من تيكر اللحظة الواحدة)
+        const pump = detectPumpRisk(closes, volumes);
+        if (pump.risk && (pump.severity === "high" || pump.severity === "extreme")) return null;
+
+        // استثناء العملات المستقرة (Stablecoins) غير المدرجة بالقائمة — سعر ثابت تقريباً عند 1$
+        const meanPrice = closes.reduce((a, b) => a + b, 0) / closes.length;
+        const priceRange = (Math.max(...closes) - Math.min(...closes)) / meanPrice;
+        if (meanPrice > 0.9 && meanPrice < 1.1 && priceRange < 0.04) return null;
+
+        const ai = buildAIScore(closes, highs, lows, opens, volumes, { trades: [], buys: 0, sells: 0, total: 0 }, []);
+        if (!ai) return null;
+        const { breakout_score, reasons } = calcBreakoutScore(ai);
+        const currentPrice = closes[closes.length - 1];
+        const periodHigh = ai.support_resistance?.period_high || currentPrice;
+        let upsidePct = 0;
+        if (periodHigh > currentPrice * 1.02) {
+          upsidePct = Math.round((periodHigh - currentPrice) / currentPrice * 100);
+        } else if (ai.atr_target && ai.atr_target > currentPrice) {
+          upsidePct = Math.round((ai.atr_target - currentPrice) / currentPrice * 100);
+        }
+        const rank = (breakout_score * 0.6 + ai.ai_score * 0.4) * (ai.rsi > 72 ? 0.65 : 1);
+        return {
+          symbol: pair,
+          price: currentPrice,
+          ai_score: ai.ai_score, grade: ai.grade, grade_color: ai.grade_color,
+          breakout_score, reasons,
+          entry_signal: ai.entry_signal,
+          rsi: ai.rsi, macd_bull: ai.macd?.bullish,
+          ma: ai.ma, regime: ai.regime,
+          atr_stop: ai.atr_stop, atr_target: ai.atr_target, atr_rr: ai.atr_rr,
+          upside_pct: upsidePct,
+          period_high: Math.round(periodHigh * 100) / 100,
+          quote_volume_24h: Math.round(parseFloat(t.quote_volume) || 0),
+          rank
+        };
+      } catch (_) { return null; }
+    };
+
+    const settled = await Promise.allSettled(candidates.map(scanOne));
+    const results = settled.map(r => (r.status === "fulfilled" ? r.value : null)).filter(Boolean);
+    results.sort((a, b) => b.rank - a.rank);
+    return {
+      scanned: candidates.length,
+      excluded_low_quality: allTickers.length - candidates.length,
+      found: results.length,
+      top: results.slice(0, top),
+      ts: Date.now()
+    };
+  }, 30 * 60000)
+    .then(d => res.json(d))
+    .catch(e => res.json(upstreamError(e)));
 });
 
 // ===== تحليل التجميع =====
@@ -1387,7 +1522,8 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
         rsi:        Math.round((rsiArr[last]??50)*10)/10,
         obv_trend:  obvTrend,
         above_ma20: closes[last] > (ma20Arr[last] ?? closes[last]),
-        ma20:       Math.round((ma20Arr[last]??closes[last])*100)/100
+        ma20:       Math.round((ma20Arr[last]??closes[last])*100)/100,
+        pump_risk:  detectPumpRisk(closes, volumes)
       };
     } else {
       // Use Yahoo Finance
@@ -1443,6 +1579,15 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
     const analysts  = analystsResult.status  === 'fulfilled' ? analystsResult.value  : null;
 
     const rec = buildRecommendation(analysis, congress, news);
+
+    // عملات البمب أند دمب (Shitcoin) — تجاوز التوصية الفنية بتحذير صريح
+    if (analysis.pump_risk?.risk && (analysis.pump_risk.severity === 'high' || analysis.pump_risk.severity === 'extreme')) {
+      rec.recommendation    = 'AVOID_PUMP';
+      rec.recommendation_ar = 'تجنب — اشتباه عملة بمب';
+      rec.confidence         = 90;
+      rec.daily_tip          = analysis.pump_risk.reason;
+      rec.analysis_reason    = `${analysis.pump_risk.reason}\n\n${rec.analysis_reason}`;
+    }
 
     const analystsSummary = analysts ? {
       total_analysts: analysts.total_analysts,
@@ -1767,6 +1912,14 @@ app.get("/proxy/ai/:symbol", async (req, res) => {
 
     const ai = buildAIScore(closes, highs, lows, opens, volumes, congress, news);
     if (!ai) return res.json({ error: 'خطأ في الحساب', symbol });
+
+    if (type === 'crypto') {
+      const pump = detectPumpRisk(closes, volumes);
+      ai.pump_risk = pump;
+      if (pump.risk && (pump.severity === 'high' || pump.severity === 'extreme')) {
+        ai.entry_signal = { type: 'avoid', label: '🚫 تجنب — اشتباه عملة بمب', desc: pump.reason, color: '#f85149' };
+      }
+    }
 
     ai.chart_times  = times.slice(-60).map(t => { const d = new Date(t); return `${d.getMonth()+1}/${d.getDate()}`; });
     ai.close_series = closes.slice(-60).map(c => Math.round(c * 100) / 100);
