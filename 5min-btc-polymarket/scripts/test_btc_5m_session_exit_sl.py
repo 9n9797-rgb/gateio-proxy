@@ -50,6 +50,28 @@ def bucket_5m(ts: int) -> int:
     return ts - (ts % 300)
 
 
+GATEIO_TICKER_URL = "https://api.gateio.ws/api/v4/spot/tickers"
+
+
+def fetch_btc_price_gateio() -> Optional[float]:
+    """Fast, public, no-auth BTC/USDT price feed used to confirm real moves.
+
+    Polymarket's own market price (Gamma outcomePrices) can lag the actual
+    BTC move by a few seconds. Gate.io's ticker is used here as an
+    independent, low-latency reference so entries can require an actual
+    dollar move, not just a CLOB ask that has already repriced.
+    """
+    try:
+        r = requests.get(GATEIO_TICKER_URL, params={"currency_pair": "BTC_USDT"}, timeout=4)
+        r.raise_for_status()
+        arr = r.json()
+        if not arr:
+            return None
+        return float(arr[0]["last"])
+    except Exception:
+        return None
+
+
 def fetch_event(slug: str) -> Optional[dict[str, Any]]:
     r = requests.get('https://gamma-api.polymarket.com/events', params={'slug': slug}, timeout=12)
     r.raise_for_status()
@@ -290,6 +312,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         'min_entry_seconds_left': 60,
         'entry_timeout_min': 60,
         'poll_sec': 5.0,
+        'btc_move_min_usd': 70.0,
     },
     'aggressive': {
         'threshold': 0.70,
@@ -299,6 +322,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         'min_entry_seconds_left': 60,
         'entry_timeout_min': 60,
         'poll_sec': 5.0,
+        'btc_move_min_usd': 70.0,
     },
 }
 
@@ -319,6 +343,8 @@ def apply_profile(args: argparse.Namespace) -> argparse.Namespace:
         args.entry_timeout_min = int(prof['entry_timeout_min'])
     if args.poll_sec is None:
         args.poll_sec = float(prof['poll_sec'])
+    if args.btc_move_min_usd is None:
+        args.btc_move_min_usd = float(prof['btc_move_min_usd'])
     return args
 
 
@@ -342,6 +368,7 @@ def main():
     ap.add_argument('--poll-sec', type=float, default=None)
     ap.add_argument('--close-retry-max', type=int, default=18, help='Max close retries when position is not yet visible / not immediately closable')
     ap.add_argument('--close-retry-delay-sec', type=float, default=2.0, help='Delay between close retries')
+    ap.add_argument('--btc-move-min-usd', type=float, default=None, help='Require this much real BTC $ move (Gate.io feed) in the entry direction before opening')
     ap.add_argument('--execute', action='store_true')
     args = apply_profile(ap.parse_args())
 
@@ -358,6 +385,7 @@ def main():
             'poll_sec': args.poll_sec,
             'close_retry_max': args.close_retry_max,
             'close_retry_delay_sec': args.close_retry_delay_sec,
+            'btc_move_min_usd': args.btc_move_min_usd,
             'execute': args.execute,
         },
         'attempts': [],
@@ -365,6 +393,8 @@ def main():
 
     deadline = time.time() + args.entry_timeout_min * 60
     opened = None
+    btc_bucket_slug: Optional[str] = None
+    btc_bucket_start_price: Optional[float] = None
 
     while time.time() < deadline:
         try:
@@ -409,6 +439,18 @@ def main():
                 time.sleep(args.poll_sec)
                 continue
 
+            # Independent, low-latency BTC price reference (Gate.io). Polymarket's
+            # own market price can lag the real move by several seconds, so this
+            # is used to confirm an actual dollar move rather than trusting CLOB
+            # ask alone.
+            if slug != btc_bucket_slug:
+                btc_bucket_slug = slug
+                btc_bucket_start_price = fetch_btc_price_gateio()
+            btc_price_now = fetch_btc_price_gateio()
+            btc_move_usd = None
+            if btc_price_now is not None and btc_bucket_start_price is not None:
+                btc_move_usd = btc_price_now - btc_bucket_start_price
+
             report['attempts'].append({
                 'ts': ts_utc(),
                 'slug': slug,
@@ -419,6 +461,9 @@ def main():
                 'clob_down_ask': dn_ask,
                 'seconds_left': sec_left,
                 'min_spread': min_spread,
+                'btc_bucket_start_price': btc_bucket_start_price,
+                'btc_price_now': btc_price_now,
+                'btc_move_usd': btc_move_usd,
             })
 
             candidates: list[tuple[str, float]] = []
@@ -441,6 +486,34 @@ def main():
                 continue
 
             side, trigger_price = sorted(candidates, key=lambda x: x[1], reverse=True)[0]
+
+            # Confirm the move with the fast BTC feed: require a real dollar
+            # move of at least btc_move_min_usd, in the direction implied by side.
+            if btc_move_usd is None:
+                report['attempts'].append({
+                    'ts': ts_utc(),
+                    'slug': slug,
+                    'status': 'skip_btc_feed_unavailable',
+                    'side': side,
+                })
+                time.sleep(args.poll_sec)
+                continue
+
+            move_ok = (
+                (side == 'UP' and btc_move_usd >= args.btc_move_min_usd)
+                or (side == 'DOWN' and btc_move_usd <= -args.btc_move_min_usd)
+            )
+            if not move_ok:
+                report['attempts'].append({
+                    'ts': ts_utc(),
+                    'slug': slug,
+                    'status': 'skip_btc_move_not_confirmed',
+                    'side': side,
+                    'btc_move_usd': btc_move_usd,
+                    'btc_move_min_usd': args.btc_move_min_usd,
+                })
+                time.sleep(args.poll_sec)
+                continue
 
             out, objs = run_open(args.repo, slug, side, args.stake_usd, args.execute)
             post = None
