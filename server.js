@@ -8,7 +8,10 @@ import dotenv from "dotenv";
 import GateApi from "gate-api";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
+import session from "express-session";
+import bcrypt from "bcryptjs";
 
 dotenv.config();
 
@@ -17,8 +20,99 @@ const __dirname = path.dirname(__filename);
 
 // ===== إنشاء تطبيق Express =====
 const app = express();
+app.set("trust proxy", 1); // خلف بروكسي Render — مطلوب لكوكيز secure
 app.use(cors());
 app.use(express.json());
+
+// ===== نظام الحسابات (تسجيل دخول لكل مستخدم) =====
+// ملاحظة: التخزين في ملف JSON على القرص — يُعاد ضبطه عند كل عملية نشر جديدة
+// على Render (القرص غير دائم) إلا إذا أضيف قرص دائم (Persistent Disk).
+const USERS_FILE = path.join(__dirname, "data", "users.json");
+function loadUsers() {
+  try {
+    if (!fs.existsSync(USERS_FILE)) return [];
+    return JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+  } catch (_) { return []; }
+}
+function saveUsers(users) {
+  fs.mkdirSync(path.dirname(USERS_FILE), { recursive: true });
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+}
+
+if (!process.env.SESSION_SECRET) {
+  console.warn("⚠️ SESSION_SECRET غير مضبوط — سيتم توليد مفتاح مؤقت (تنتهي الجلسات عند إعادة التشغيل)");
+}
+app.use(session({
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 30 * 24 * 3600000
+  }
+}));
+
+const PUBLIC_PATHS = new Set(["/login.html", "/healthz", "/proxy/health"]);
+function isPublicPath(p) {
+  return PUBLIC_PATHS.has(p) || p.startsWith("/auth/");
+}
+
+app.post("/auth/register", (req, res) => {
+  const { username, password, register_code, agree_terms } = req.body || {};
+  if (!agree_terms) return res.status(400).json({ error: "يجب الموافقة على الشروط وإقرار عدم الضمان قبل إنشاء الحساب" });
+  if (!process.env.REGISTER_CODE) return res.status(403).json({ error: "التسجيل مغلق — لم يتم ضبط REGISTER_CODE من لوحة Render" });
+  if (register_code !== process.env.REGISTER_CODE) return res.status(403).json({ error: "رمز الدعوة غير صحيح" });
+  if (!username || !password || password.length < 6) return res.status(400).json({ error: "اسم مستخدم وكلمة مرور (6 أحرف على الأقل) مطلوبة" });
+
+  const users = loadUsers();
+  if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+    return res.status(409).json({ error: "اسم المستخدم مستخدم بالفعل" });
+  }
+  const user = {
+    id: crypto.randomUUID(),
+    username,
+    password_hash: bcrypt.hashSync(password, 10),
+    agreed_terms_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
+  };
+  users.push(user);
+  saveUsers(users);
+  req.session.userId = user.id;
+  req.session.username = user.username;
+  res.json({ ok: true, username: user.username });
+});
+
+app.post("/auth/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const users = loadUsers();
+  const user = users.find(u => u.username.toLowerCase() === String(username || "").toLowerCase());
+  if (!user || !bcrypt.compareSync(password || "", user.password_hash)) {
+    return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+  }
+  req.session.userId = user.id;
+  req.session.username = user.username;
+  res.json({ ok: true, username: user.username });
+});
+
+app.post("/auth/logout", (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.get("/auth/me", (req, res) => {
+  res.json({ authenticated: !!req.session.userId, username: req.session.username || null });
+});
+
+app.use((req, res, next) => {
+  if (isPublicPath(req.path)) return next();
+  if (req.session && req.session.userId) return next();
+  if (req.path.startsWith("/proxy/") || req.headers.accept?.includes("application/json")) {
+    return res.status(401).json({ error: "يلزم تسجيل الدخول", login_required: true });
+  }
+  return res.redirect("/login.html");
+});
+
 app.use(express.static(__dirname)); // يخدم الملفات الساكنة بجانب server.js
 
 // ===== Gate API Client =====

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>تسجيل الدخول — محلل الأسهم والعملات</title>
+<style>
+  :root{
+    --bg:#0d1117;--card:#161b22;--border:#30363d;
+    --text:#e6edf3;--muted:#7d8590;--green:#3fb950;--red:#f85149;--blue:#58a6ff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .box{width:100%;max-width:380px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px 24px}
+  h1{font-size:20px;text-align:center;margin-bottom:6px}
+  .sub{font-size:13px;color:var(--muted);text-align:center;margin-bottom:22px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;margin-top:14px}
+  input[type=text],input[type=password]{width:100%;background:#0d1117;border:1px solid var(--border);border-radius:8px;
+    padding:10px 12px;color:var(--text);font-size:14px;outline:none}
+  input:focus{border-color:var(--blue)}
+  .terms{display:flex;align-items:flex-start;gap:8px;margin-top:16px;font-size:11px;color:var(--muted);line-height:1.5}
+  .terms input{margin-top:3px}
+  .disclaimer{background:#2a1f0a;border:1px solid #7a5400;border-radius:8px;padding:10px 12px;font-size:11px;color:#d29922;margin-top:14px;line-height:1.6}
+  button{width:100%;margin-top:18px;background:var(--blue);color:#0d1117;border:none;border-radius:10px;
+    padding:12px;font-size:15px;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.6;cursor:default}
+  .switch{text-align:center;margin-top:16px;font-size:13px;color:var(--muted)}
+  .switch a{color:var(--blue);cursor:pointer;text-decoration:none}
+  .err{background:#2a0d0d;border:1px solid #6a2020;color:var(--red);border-radius:8px;padding:9px 12px;
+    font-size:12px;margin-top:14px;display:none}
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1 id="title">تسجيل الدخول</h1>
+    <div class="sub">محلل الأسهم والعملات — وصول خاص</div>
+
+    <form id="form">
+      <label>اسم المستخدم</label>
+      <input type="text" id="username" autocomplete="username" required>
+
+      <label>كلمة المرور</label>
+      <input type="password" id="password" autocomplete="current-password" required>
+
+      <div id="registerFields" style="display:none">
+        <label>رمز الدعوة</label>
+        <input type="text" id="register_code" autocomplete="off">
+
+        <div class="terms">
+          <input type="checkbox" id="agree_terms">
+          <span>أوافق على أن هذا البرنامج أداة تحليل آلي فقط، لا يقدّم نصيحة مالية ولا يضمن أي نتيجة أو ربح،
+            وأنني وحدي المسؤول عن أي قرار تداول أو استخدام لمفاتيح API الخاصة بالحساب.</span>
+        </div>
+      </div>
+
+      <div class="disclaimer">
+        ⚠️ تنبيه: هذه الأداة لأغراض التحليل الفني فقط وليست نصيحة مالية. التداول ينطوي على مخاطر فقدان رأس المال.
+      </div>
+
+      <div class="err" id="err"></div>
+      <button type="submit" id="submitBtn">دخول</button>
+    </form>
+
+    <div class="switch">
+      <span id="switchText">ليس لديك حساب؟</span>
+      <a id="switchLink" onclick="toggleMode()">إنشاء حساب</a>
+    </div>
+  </div>
+
+<script>
+let mode = 'login';
+function toggleMode() {
+  mode = mode === 'login' ? 'register' : 'login';
+  document.getElementById('title').textContent = mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب';
+  document.getElementById('submitBtn').textContent = mode === 'login' ? 'دخول' : 'إنشاء الحساب';
+  document.getElementById('registerFields').style.display = mode === 'register' ? 'block' : 'none';
+  document.getElementById('switchText').textContent = mode === 'login' ? 'ليس لديك حساب؟' : 'لديك حساب بالفعل؟';
+  document.getElementById('switchLink').textContent = mode === 'login' ? 'إنشاء حساب' : 'تسجيل الدخول';
+  document.getElementById('err').style.display = 'none';
+}
+
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('err');
+  errEl.style.display = 'none';
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+
+  const body = {
+    username: document.getElementById('username').value.trim(),
+    password: document.getElementById('password').value
+  };
+  if (mode === 'register') {
+    body.register_code = document.getElementById('register_code').value.trim();
+    body.agree_terms = document.getElementById('agree_terms').checked;
+  }
+
+  try {
+    const r = await fetch(`/auth/${mode === 'login' ? 'login' : 'register'}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'حدث خطأ');
+    location.href = '/';
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

@@ -249,7 +249,10 @@
 
 <div class="header">
   <h1 id="headerTitle">محلل الأسهم</h1>
-  <span style="font-size:11px;color:var(--muted)" id="headerSym"></span>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span style="font-size:11px;color:var(--muted)" id="headerSym"></span>
+    <span style="font-size:16px;cursor:pointer" onclick="logout()" title="تسجيل الخروج">⏻</span>
+  </div>
 </div>
 
 <!-- Type toggle -->
@@ -342,6 +345,16 @@
 </nav>
 
 <script>
+// إعادة توجيه لصفحة الدخول إذا انتهت الجلسة
+const _origFetch = window.fetch;
+window.fetch = async (...args) => {
+  const r = await _origFetch(...args);
+  if (r.status === 401) {
+    try { const d = await r.clone().json(); if (d.login_required) { location.href = '/login.html'; } } catch (_) {}
+  }
+  return r;
+};
+
 // ============================================================
 // State
 // ============================================================
@@ -434,6 +447,14 @@ function onSearch() {
 // ============================================================
 // Tab switching
 // ============================================================
+// ============================================================
+// Logout
+// ============================================================
+async function logout() {
+  await fetch('/auth/logout', { method: 'POST' });
+  location.href = '/login.html';
+}
+
 // ============================================================
 // Live price polling
 // ============================================================
