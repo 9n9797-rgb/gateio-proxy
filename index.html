@@ -855,9 +855,10 @@ function renderRecommend(d) {
       <div class="target-value" style="color:var(--muted)">لا توصية بالدخول</div>
     </div>`;
 
-  const pumpHtml = d.pump_risk?.risk ? `
+  const riskNotes = [d.pump_risk?.risk && d.pump_risk.reason, d.spread_risk?.risk && d.spread_risk.reason].filter(Boolean);
+  const pumpHtml = riskNotes.length ? `
     <div style="background:#2a0d0d;border:1px solid #6a2020;color:#f85149;border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:12px;line-height:1.6">
-      ${d.pump_risk.reason}
+      ${riskNotes.join('<br>')}
     </div>` : '';
 
   document.getElementById('recommendContent').innerHTML = `
@@ -1437,10 +1438,16 @@ function renderAI(d) {
       <div style="font-size:11px;color:var(--muted);margin-top:3px">${d.symbol||currentSym} · ${prefix}${fmt(d.current_price)}</div>
     </div>
 
-    ${d.pump_risk?.risk && d.pump_risk.severity === 'medium' ? `
+    ${(() => {
+      const notes = [
+        d.pump_risk?.risk   && d.pump_risk.severity   === 'medium' && d.pump_risk.reason,
+        d.spread_risk?.risk && d.spread_risk.severity === 'medium' && d.spread_risk.reason
+      ].filter(Boolean);
+      return notes.length ? `
     <div style="margin:0 16px 10px;background:#2a1f0a;border:1px solid #7a5400;color:#d29922;border-radius:10px;padding:9px 12px;font-size:11px;line-height:1.6">
-      ${d.pump_risk.reason}
-    </div>` : ''}
+      ${notes.join('<br>')}
+    </div>` : '';
+    })()}
 
     <div style="margin:0 16px 12px;background:${(d.entry_signal?.color||'#8b949e')}22;border:1px solid ${d.entry_signal?.color||'#8b949e'};border-radius:12px;padding:12px 16px">
       <div style="font-size:16px;font-weight:700;color:${d.entry_signal?.color}">${d.entry_signal?.label||''}</div>

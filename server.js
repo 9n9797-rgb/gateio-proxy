@@ -1158,6 +1158,8 @@ app.get("/proxy/scan/crypto", async (req, res) => {
         if (quoteVol < MIN_QUOTE_VOLUME_24H) return false;
         const changePct = parseFloat(t.change_percentage) || 0;
         if (Math.abs(changePct) >= 35) return false; // استثناء تحركات البمب الواضحة فوراً
+        const spread = detectSpreadRisk(parseFloat(t.highest_bid), parseFloat(t.lowest_ask));
+        if (spread.risk && spread.severity === 'high') return false; // استثناء فرق سعر مرتفع (تكلفة دخول/خروج عالية)
         return true;
       })
       .sort((a, b) => (parseFloat(b.quote_volume) || 0) - (parseFloat(a.quote_volume) || 0))
@@ -1485,6 +1487,33 @@ app.get("/proxy/congress/:symbol", async (req, res) => {
 });
 
 // GET /proxy/recommend/:symbol?type=stock|crypto&range=3mo
+// === كشف خطر فرق سعر العرض/الطلب (Spread) — عملات سيئة السيولة تجعلك تخسر من
+// فرق السعر وحده عند البيع، حتى لو كانت الصفقة "رابحة" فنياً ===
+function detectSpreadRisk(bid, ask) {
+  if (!bid || !ask || ask <= 0 || bid <= 0) return { risk: false };
+  const spreadPct = ((ask - bid) / ask) * 100;
+  let severity = null;
+  if (spreadPct >= 1.5)      severity = 'high';
+  else if (spreadPct >= 0.5) severity = 'medium';
+  if (!severity) return { risk: false, spread_pct: Math.round(spreadPct * 100) / 100 };
+  return {
+    risk: true,
+    severity,
+    spread_pct: Math.round(spreadPct * 100) / 100,
+    reason: severity === 'high'
+      ? `⚠️ فرق سعر العرض/الطلب مرتفع جداً (${spreadPct.toFixed(2)}%) — ستخسر من فرق السعر وحده عند البيع حتى لو ربحت فنياً، تجنّب هذه العملة`
+      : `⚠️ فرق سعر العرض/الطلب أعلى من المعتاد (${spreadPct.toFixed(2)}%) — احسب تكلفة الدخول والخروج قبل التداول`
+  };
+}
+
+async function fetchGateTicker(pair) {
+  try {
+    const r = await withTimeout(fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pair}`), 5000);
+    const arr = await r.json();
+    return Array.isArray(arr) ? arr[0] : null;
+  } catch (_) { return null; }
+}
+
 app.get("/proxy/recommend/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const type   = req.query.type === 'crypto' ? 'crypto' : 'stock';
@@ -1496,9 +1525,11 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
     if (type === 'crypto') {
       // Use Gate.io candles
       const pair  = symbol.includes('_') ? symbol : `${symbol}_USDT`;
-      const url   = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=60`;
-      const r     = await withTimeout(fetch(url), 8000);
-      const raw   = await r.json();
+      const [candleRes, ticker] = await Promise.all([
+        withTimeout(fetch(`https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=60`), 8000).then(r => r.json()),
+        fetchGateTicker(pair)
+      ]);
+      const raw = candleRes;
       if (!Array.isArray(raw) || raw.length < 5)
         return res.json({ error: 'بيانات غير كافية للعملة', symbol });
 
@@ -1512,6 +1543,7 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
       const obvArr  = calculateOBV(closes, volumes);
       const ma20Arr = calculateMA(closes, 20);
       const obvTrend= getOBVTrend(obvArr);
+      const spreadRisk = ticker ? detectSpreadRisk(parseFloat(ticker.highest_bid), parseFloat(ticker.lowest_ask)) : { risk: false };
 
       analysis = {
         symbol: pair, name: pair, type: 'crypto',
@@ -1523,7 +1555,8 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
         obv_trend:  obvTrend,
         above_ma20: closes[last] > (ma20Arr[last] ?? closes[last]),
         ma20:       Math.round((ma20Arr[last]??closes[last])*100)/100,
-        pump_risk:  detectPumpRisk(closes, volumes)
+        pump_risk:  detectPumpRisk(closes, volumes),
+        spread_risk: spreadRisk
       };
     } else {
       // Use Yahoo Finance
@@ -1580,13 +1613,17 @@ app.get("/proxy/recommend/:symbol", async (req, res) => {
 
     const rec = buildRecommendation(analysis, congress, news);
 
-    // عملات البمب أند دمب (Shitcoin) — تجاوز التوصية الفنية بتحذير صريح
-    if (analysis.pump_risk?.risk && (analysis.pump_risk.severity === 'high' || analysis.pump_risk.severity === 'extreme')) {
+    // عملات البمب أند دمب (Shitcoin) أو ضعيفة السيولة (فرق سعر مرتفع) — تجاوز التوصية الفنية بتحذير صريح
+    const pumpBad   = analysis.pump_risk?.risk   && (analysis.pump_risk.severity   === 'high' || analysis.pump_risk.severity   === 'extreme');
+    const spreadBad = analysis.spread_risk?.risk && analysis.spread_risk.severity === 'high';
+    if (pumpBad || spreadBad) {
+      const reason = [analysis.pump_risk?.risk && analysis.pump_risk.reason, analysis.spread_risk?.risk && analysis.spread_risk.reason]
+        .filter(Boolean).join(' — ');
       rec.recommendation    = 'AVOID_PUMP';
-      rec.recommendation_ar = 'تجنب — اشتباه عملة بمب';
+      rec.recommendation_ar = pumpBad ? 'تجنب — اشتباه عملة بمب' : 'تجنب — سيولة ضعيفة (فرق سعر مرتفع)';
       rec.confidence         = 90;
-      rec.daily_tip          = analysis.pump_risk.reason;
-      rec.analysis_reason    = `${analysis.pump_risk.reason}\n\n${rec.analysis_reason}`;
+      rec.daily_tip          = reason;
+      rec.analysis_reason    = `${reason}\n\n${rec.analysis_reason}`;
     }
 
     const analystsSummary = analysts ? {
@@ -1861,12 +1898,14 @@ app.get("/proxy/ai/:symbol", async (req, res) => {
   const range  = ['1mo','3mo','6mo','1y'].includes(req.query.range) ? req.query.range : '3mo';
 
   try {
-    let closes, highs, lows, opens, volumes, times;
+    let closes, highs, lows, opens, volumes, times, cryptoTicker = null;
     if (type === 'crypto') {
       const pair = symbol.includes('_') ? symbol : `${symbol}_USDT`;
-      const url  = `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=120`;
-      const r    = await withTimeout(fetch(url), 8000);
-      const raw  = await r.json();
+      const [raw, ticker] = await Promise.all([
+        withTimeout(fetch(`https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${pair}&interval=1d&limit=120`), 8000).then(r => r.json()),
+        fetchGateTicker(pair)
+      ]);
+      cryptoTicker = ticker;
       if (!Array.isArray(raw) || raw.length < 30) return res.json({ error: 'بيانات غير كافية', symbol });
       closes  = raw.map(c => parseFloat(c[2]));
       highs   = raw.map(c => parseFloat(c[3]));
@@ -1914,10 +1953,19 @@ app.get("/proxy/ai/:symbol", async (req, res) => {
     if (!ai) return res.json({ error: 'خطأ في الحساب', symbol });
 
     if (type === 'crypto') {
-      const pump = detectPumpRisk(closes, volumes);
-      ai.pump_risk = pump;
-      if (pump.risk && (pump.severity === 'high' || pump.severity === 'extreme')) {
-        ai.entry_signal = { type: 'avoid', label: '🚫 تجنب — اشتباه عملة بمب', desc: pump.reason, color: '#f85149' };
+      const pump   = detectPumpRisk(closes, volumes);
+      const spread = cryptoTicker ? detectSpreadRisk(parseFloat(cryptoTicker.highest_bid), parseFloat(cryptoTicker.lowest_ask)) : { risk: false };
+      ai.pump_risk   = pump;
+      ai.spread_risk = spread;
+      const pumpBad   = pump.risk   && (pump.severity === 'high' || pump.severity === 'extreme');
+      const spreadBad = spread.risk && spread.severity === 'high';
+      if (pumpBad || spreadBad) {
+        const reason = [pump.risk && pump.reason, spread.risk && spread.reason].filter(Boolean).join(' — ');
+        ai.entry_signal = {
+          type: 'avoid',
+          label: pumpBad ? '🚫 تجنب — اشتباه عملة بمب' : '🚫 تجنب — سيولة ضعيفة',
+          desc: reason, color: '#f85149'
+        };
       }
     }
 
