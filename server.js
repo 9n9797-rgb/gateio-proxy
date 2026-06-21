@@ -15,7 +15,8 @@ import * as strategy from "./lib/strategy.js";
 import * as risk from "./lib/riskManager.js";
 import { calculateRSI, calculateOBV, getOBVTrend, calculateMA } from "./lib/indicators.js";
 import db from "./lib/db.js";
-import { requestLoginCode, verifyLoginCode, requireAuth, logout } from "./lib/auth.js";
+import { register, login, requestPasswordReset, resetPassword, requireAuth, requireAdmin, isAdminEmail, logout } from "./lib/auth.js";
+import * as admin from "./lib/admin.js";
 import { setKeys, removeKeys, hasKeys } from "./lib/exchangeKeys.js";
 import { executeRecommendation, dismissRecommendation, analyzePair, analyzeAndExecute } from "./lib/autopilot.js";
 
@@ -274,20 +275,38 @@ app.get("/proxy/pairs", async (req, res) => {
   }
 });
 
-// ===== تسجيل الدخول بدون كلمة مرور (رمز يُرسل للبريد) =====
-app.post("/auth/request-code", async (req, res) => {
+// ===== تسجيل/دخول بكلمة سر + استعادة كلمة السر برمز يُرسل للبريد =====
+app.post("/auth/register", (req, res) => {
   try {
-    await requestLoginCode(req.body.email);
-    res.json({ ok: true, message: "تم إرسال رمز الدخول إلى بريدك" });
+    const result = register(req.body.email, req.body.password);
+    res.json({ ok: true, ...result });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
 });
 
-app.post("/auth/verify-code", (req, res) => {
+app.post("/auth/login", (req, res) => {
   try {
-    const result = verifyLoginCode(req.body.email, req.body.code);
+    const result = login(req.body.email, req.body.password);
     res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/auth/forgot-password", async (req, res) => {
+  try {
+    await requestPasswordReset(req.body.email);
+    res.json({ ok: true, message: "إن كان بريدك مسجّلاً، سيصلك رمز استعادة كلمة السر" });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/auth/reset-password", (req, res) => {
+  try {
+    resetPassword(req.body.email, req.body.code, req.body.new_password);
+    res.json({ ok: true, message: "تم تغيير كلمة السر، سجّل الدخول بها الآن" });
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
@@ -461,6 +480,34 @@ app.post("/autopilot/analyze/:pair/execute", requireAuth, async (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
+});
+
+// ===== لوحة الأدمن (صلاحية محدودة ببريد ضمن ADMIN_EMAILS، تسجيل الدخول نفسه
+// بالرمز المرسل للبريد — لا توجد كلمة مرور أدمن منفصلة لتُسرَّب أو تُفقد) =====
+
+app.get("/admin/me", requireAuth, (req, res) => {
+  res.json({ is_admin: isAdminEmail(req.user.email) });
+});
+
+app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, users: admin.listUsers() });
+});
+
+app.post("/admin/users/:id/toggle", requireAuth, requireAdmin, (req, res) => {
+  try {
+    admin.toggleUser(Number(req.params.id), Boolean(req.body.disabled));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/admin/stats", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, stats: admin.platformStats() });
+});
+
+app.get("/admin/ai-report", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, report: admin.aiReport() });
 });
 
 // تشغيل حلقة الأوتوبايلوت (تفحص كل المستخدمين النشطين دورياً)

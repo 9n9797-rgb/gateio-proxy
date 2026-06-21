@@ -31,7 +31,7 @@ services:
       # إلزامي لتشفير مفاتيح Gate.io لكل مستخدم — أنشئه بـ: openssl rand -hex 32
       - key: APP_ENCRYPTION_KEY
         sync: false
-      # بريد إرسال رمز الدخول (اختياري؛ بدونه يُطبع الرمز في السجلات فقط — غير مناسب للإنتاج)
+      # بريد إرسال رمز استعادة كلمة السر (اختياري؛ بدونه يُطبع الرمز في السجلات فقط — غير مناسب للإنتاج)
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -48,6 +48,9 @@ services:
       # حماية إلزامية: التداول الحقيقي يبقى معطّلاً ما لم تُفعّله عمداً
       - key: AUTOPILOT_ALLOW_LIVE
         value: "false"
+      # بريد/بريد الأدمن (مفصول بفواصل) — يُمنح صلاحية لوحة /app/admin.html
+      - key: ADMIN_EMAILS
+        sync: false
 
     # (اختياري) تحويلات/روابط مختصرة
     routes:
