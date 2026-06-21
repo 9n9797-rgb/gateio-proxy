@@ -15,7 +15,8 @@ import * as strategy from "./lib/strategy.js";
 import * as risk from "./lib/riskManager.js";
 import { calculateRSI, calculateOBV, getOBVTrend, calculateMA } from "./lib/indicators.js";
 import db from "./lib/db.js";
-import { requestLoginCode, verifyLoginCode, requireAuth, logout } from "./lib/auth.js";
+import { requestLoginCode, verifyLoginCode, requireAuth, requireAdmin, isAdminEmail, logout } from "./lib/auth.js";
+import * as admin from "./lib/admin.js";
 import { setKeys, removeKeys, hasKeys } from "./lib/exchangeKeys.js";
 import { executeRecommendation, dismissRecommendation, analyzePair, analyzeAndExecute } from "./lib/autopilot.js";
 
@@ -461,6 +462,34 @@ app.post("/autopilot/analyze/:pair/execute", requireAuth, async (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
+});
+
+// ===== لوحة الأدمن (صلاحية محدودة ببريد ضمن ADMIN_EMAILS، تسجيل الدخول نفسه
+// بالرمز المرسل للبريد — لا توجد كلمة مرور أدمن منفصلة لتُسرَّب أو تُفقد) =====
+
+app.get("/admin/me", requireAuth, (req, res) => {
+  res.json({ is_admin: isAdminEmail(req.user.email) });
+});
+
+app.get("/admin/users", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, users: admin.listUsers() });
+});
+
+app.post("/admin/users/:id/toggle", requireAuth, requireAdmin, (req, res) => {
+  try {
+    admin.toggleUser(Number(req.params.id), Boolean(req.body.disabled));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/admin/stats", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, stats: admin.platformStats() });
+});
+
+app.get("/admin/ai-report", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, report: admin.aiReport() });
 });
 
 // تشغيل حلقة الأوتوبايلوت (تفحص كل المستخدمين النشطين دورياً)

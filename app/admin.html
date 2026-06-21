@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>لوحة الأدمن — Gate.io Autopilot</title>
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+
+<div class="header">
+  <a href="/app/dashboard.html" class="btn-icon">→</a>
+  <h1>لوحة الأدمن</h1>
+  <span class="btn-icon" onclick="loadAll()">↻</span>
+</div>
+
+<div class="page" id="content">
+  <div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>
+</div>
+
+<script src="/app/app.js"></script>
+<script>
+requireAuthPage();
+
+async function loadAll() {
+  const content = document.getElementById("content");
+  content.innerHTML = '<div class="state"><div class="spinner"></div><div>جاري التحميل…</div></div>';
+  try {
+    const me = await API.req("/admin/me");
+    if (!me.is_admin) {
+      content.innerHTML = '<div class="state">🚫<br><br>هذا الحساب لا يملك صلاحيات أدمن</div>';
+      return;
+    }
+    const [stats, report, usersRes] = await Promise.all([
+      API.req("/admin/stats"),
+      API.req("/admin/ai-report"),
+      API.req("/admin/users")
+    ]);
+    render(stats.stats, report.report, usersRes.users);
+  } catch (e) {
+    content.innerHTML = `<div class="state">❌<br><br>${e.message}</div>`;
+  }
+}
+
+function render(stats, report, users) {
+  document.getElementById("content").innerHTML = `
+    <div class="section-title">المشتركون</div>
+    <div class="cards">
+      <div class="metric-card">
+        <div class="metric-label">إجمالي المستخدمين</div>
+        <div class="metric-value">${stats.total_users}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">نشطون (paper/live)</div>
+        <div class="metric-value">${stats.active_subscribers}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">حسابات حقيقية</div>
+        <div class="metric-value">${stats.live_traders}</div>
+      </div>
+    </div>
+
+    <div class="section-title">بيانات التداول على المنصة</div>
+    <div class="cards">
+      <div class="metric-card">
+        <div class="metric-label">إجمالي الصفقات</div>
+        <div class="metric-value">${stats.trades_total}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">رابحة</div>
+        <div class="metric-value" style="color:var(--green)">${stats.trades_wins}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">خاسرة</div>
+        <div class="metric-value" style="color:var(--red)">${stats.trades_losses}</div>
+      </div>
+    </div>
+    <div class="card mt">
+      <div class="flex-between" style="margin-bottom:8px">
+        <span style="font-size:13px">نسبة الفوز</span>
+        <span class="badge ${stats.win_rate_pct >= 50 ? 'badge-green' : 'badge-red'}">${stats.win_rate_pct}%</span>
+      </div>
+      <div class="flex-between" style="margin-bottom:8px">
+        <span style="font-size:13px">إجمالي الأرباح (وهمي + حقيقي)</span>
+        <span class="badge badge-green">+$${formatNum(stats.gross_profit_usdt)}</span>
+      </div>
+      <div class="flex-between" style="margin-bottom:8px">
+        <span style="font-size:13px">إجمالي الخسائر</span>
+        <span class="badge badge-red">-$${formatNum(Math.abs(stats.gross_loss_usdt))}</span>
+      </div>
+      <div class="flex-between">
+        <span style="font-size:13px">صافي الربح/الخسارة</span>
+        <span class="badge ${stats.net_pnl_usdt >= 0 ? 'badge-green' : 'badge-red'}">${stats.net_pnl_usdt >= 0 ? '+' : ''}$${formatNum(stats.net_pnl_usdt)}</span>
+      </div>
+    </div>
+    <div class="card mt" style="font-size:11px;color:var(--muted)">
+      💰 سيولة المحافظ الوهمية الإجمالية: $${formatNum(stats.paper_total_cash)} •
+      صفقات الحسابات الحقيقية: ${stats.live_trades_total}
+      (أرباح $${formatNum(stats.live_gross_profit_usdt)} / خسائر $${formatNum(Math.abs(stats.live_gross_loss_usdt))})
+    </div>
+
+    <div class="section-title">تقرير الذكاء الصناعي</div>
+    <div class="card">
+      <div style="font-size:13px;line-height:1.8">${report.summary}</div>
+    </div>
+    <div class="card mt">
+      ${Object.entries(report.avg_weights).map(([k, v]) => `
+        <div class="flex-between" style="margin-bottom:8px">
+          <span style="font-size:13px">${({rsi:'RSI', macd:'MACD', trend:'الاتجاه', obv:'OBV'})[k] || k}</span>
+          <span class="badge ${v >= 1 ? 'badge-green' : 'badge-red'}">${v}</span>
+        </div>
+      `).join("")}
+    </div>
+
+    <div class="section-title">المستخدمون (${users.length})</div>
+    ${users.map(u => `
+      <div class="list-item" style="align-items:flex-start">
+        <div>
+          <div class="li-main" style="direction:ltr;text-align:right">${u.email}</div>
+          <div class="li-sub">#${u.id} • ${new Date(u.created_at).toLocaleDateString("ar")} •
+            ${u.execution === 'off' ? 'متوقف' : u.execution === 'live' ? 'حقيقي' : 'وهمي'} •
+            ${u.decision_mode === 'auto' ? 'تلقائي' : 'توصيات'} • صفقات ${u.trade_count}</div>
+          <div class="li-sub">سيولة وهمية $${formatNum(u.paper_cash)} •
+            ربح/خسارة محقّق ${u.paper_realized_pnl >= 0 ? '+' : ''}$${formatNum(u.paper_realized_pnl)} •
+            ${u.has_exchange_keys ? 'مفاتيح مرتبطة' : 'بدون مفاتيح'}</div>
+        </div>
+        <div class="li-actions">
+          <span class="badge ${u.disabled ? 'badge-red' : 'badge-green'}">${u.disabled ? 'معطّل' : 'فعّال'}</span>
+          <button class="btn ${u.disabled ? 'btn-green' : 'btn-red'} btn-sm" onclick="toggleUser(${u.id}, ${!u.disabled})">
+            ${u.disabled ? 'تفعيل' : 'تعطيل'}
+          </button>
+        </div>
+      </div>
+    `).join("")}
+  `;
+}
+
+async function toggleUser(id, disabled) {
+  if (!confirm(disabled ? "تعطيل هذا الحساب؟ لن يستطيع المستخدم تسجيل الدخول أو التداول." : "إعادة تفعيل هذا الحساب؟")) return;
+  try {
+    await API.req(`/admin/users/${id}/toggle`, { method: "POST", body: JSON.stringify({ disabled }) });
+    showToast(disabled ? "تم تعطيل الحساب" : "تم تفعيل الحساب", "success");
+    loadAll();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+loadAll();
+</script>
+</body>
+</html>

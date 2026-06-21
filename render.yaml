@@ -48,6 +48,9 @@ services:
       # حماية إلزامية: التداول الحقيقي يبقى معطّلاً ما لم تُفعّله عمداً
       - key: AUTOPILOT_ALLOW_LIVE
         value: "false"
+      # بريد/بريد الأدمن (مفصول بفواصل) — يُمنح صلاحية لوحة /app/admin.html
+      - key: ADMIN_EMAILS
+        sync: false
 
     # (اختياري) تحويلات/روابط مختصرة
     routes:

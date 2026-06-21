@@ -29,24 +29,30 @@ let selectedPairs = [];
 async function load() {
   const content = document.getElementById("content");
   try {
-    const [me, status] = await Promise.all([
+    const [me, status, adminMe] = await Promise.all([
       API.req("/account/me"),
-      API.req("/autopilot/status")
+      API.req("/autopilot/status"),
+      API.req("/admin/me").catch(() => ({ is_admin: false }))
     ]);
     selectedPairs = status.pairs.length ? status.pairs : ["BTC_USDT"];
-    render(me, status);
+    render(me, status, adminMe.is_admin);
   } catch (e) {
     content.innerHTML = `<div class="state">❌<br><br>${e.message}</div>`;
   }
 }
 
-function render(me, status) {
+function render(me, status, isAdmin) {
   document.getElementById("content").innerHTML = `
     <div class="section-title">الحساب</div>
     <div class="card">
       <div style="font-size:14px;margin-bottom:4px">${me.email}</div>
       <div class="muted" style="font-size:12px">معرّف المستخدم #${me.id}</div>
     </div>
+
+    ${isAdmin ? `
+      <div class="section-title">الإدارة</div>
+      <a href="/app/admin.html" class="btn btn-ghost">🛡️ لوحة الأدمن</a>
+    ` : ''}
 
     <div class="section-title">مفاتيح Gate.io</div>
     <div class="card">
