@@ -16,30 +16,79 @@
 
 <div class="page">
   <div class="card center" style="padding:28px 18px">
-    <div style="font-size:34px;margin-bottom:6px">🔐</div>
-    <div style="font-size:16px;font-weight:600;margin-bottom:4px">تسجيل الدخول بدون كلمة مرور</div>
-    <div class="muted" style="font-size:13px;margin-bottom:18px">أدخل بريدك الإلكتروني وسنرسل لك رمز دخول من 6 أرقام</div>
 
-    <div id="stepEmail">
+    <div id="viewLogin">
+      <div style="font-size:34px;margin-bottom:6px">🔐</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:18px">تسجيل الدخول</div>
       <div class="form-group">
         <label class="form-label">البريد الإلكتروني</label>
-        <input type="email" id="email" placeholder="you@example.com" autocomplete="email">
+        <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email">
       </div>
-      <button class="btn btn-primary" id="sendBtn" onclick="sendCode()">إرسال رمز الدخول</button>
+      <div class="form-group">
+        <label class="form-label">كلمة السر</label>
+        <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">دخول</button>
+      <div class="mt" style="font-size:13px">
+        <a href="#" class="muted" onclick="showView('forgot');return false">نسيت كلمة السر؟</a>
+      </div>
+      <div class="mt" style="font-size:13px">
+        ليس لديك حساب؟ <a href="#" onclick="showView('register');return false">سجّل الآن</a>
+      </div>
     </div>
 
-    <div id="stepCode" style="display:none">
+    <div id="viewRegister" style="display:none">
+      <div style="font-size:34px;margin-bottom:6px">📝</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:18px">إنشاء حساب جديد</div>
       <div class="form-group">
-        <label class="form-label">رمز الدخول (6 أرقام)</label>
-        <input type="text" id="code" placeholder="123456" maxlength="6" style="text-align:center;letter-spacing:4px;direction:ltr">
+        <label class="form-label">البريد الإلكتروني</label>
+        <input type="email" id="regEmail" placeholder="you@example.com" autocomplete="email">
       </div>
-      <button class="btn btn-primary" id="verifyBtn" onclick="verifyCode()">تأكيد ودخول</button>
-      <button class="btn btn-ghost mt" onclick="backToEmail()">رجوع لتغيير البريد</button>
+      <div class="form-group">
+        <label class="form-label">كلمة السر (8 أحرف على الأقل)</label>
+        <input type="password" id="regPassword" placeholder="••••••••" autocomplete="new-password">
+      </div>
+      <button class="btn btn-primary" id="regBtn" onclick="doRegister()">إنشاء الحساب</button>
+      <div class="mt" style="font-size:13px">
+        <a href="#" onclick="showView('login');return false">رجوع لتسجيل الدخول</a>
+      </div>
     </div>
+
+    <div id="viewForgot" style="display:none">
+      <div style="font-size:34px;margin-bottom:6px">📩</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:4px">استعادة كلمة السر</div>
+      <div class="muted" style="font-size:13px;margin-bottom:18px">أدخل بريدك وسنرسل لك رمزاً لتعيين كلمة سر جديدة</div>
+      <div class="form-group">
+        <label class="form-label">البريد الإلكتروني</label>
+        <input type="email" id="forgotEmail" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <button class="btn btn-primary" id="forgotBtn" onclick="doForgot()">إرسال رمز الاستعادة</button>
+      <div class="mt" style="font-size:13px">
+        <a href="#" onclick="showView('login');return false">رجوع لتسجيل الدخول</a>
+      </div>
+    </div>
+
+    <div id="viewReset" style="display:none">
+      <div style="font-size:34px;margin-bottom:6px">🔑</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:18px">تعيين كلمة سر جديدة</div>
+      <div class="form-group">
+        <label class="form-label">رمز الاستعادة (6 أرقام)</label>
+        <input type="text" id="resetCode" placeholder="123456" maxlength="6" style="text-align:center;letter-spacing:4px;direction:ltr">
+      </div>
+      <div class="form-group">
+        <label class="form-label">كلمة السر الجديدة (8 أحرف على الأقل)</label>
+        <input type="password" id="resetPassword" placeholder="••••••••" autocomplete="new-password">
+      </div>
+      <button class="btn btn-primary" id="resetBtn" onclick="doReset()">تغيير كلمة السر</button>
+      <div class="mt" style="font-size:13px">
+        <a href="#" onclick="showView('login');return false">رجوع لتسجيل الدخول</a>
+      </div>
+    </div>
+
   </div>
 
   <div class="card mt" style="font-size:11px;color:var(--muted);line-height:1.6">
-    ⚠️ بدون ضبط SMTP على الخادم، يُطبع الرمز في سجل الخادم فقط لأغراض التجربة المحلية.
+    ⚠️ بدون ضبط SMTP على الخادم، يُطبع رمز استعادة كلمة السر في سجل الخادم فقط لأغراض التجربة المحلية.
   </div>
 </div>
 
@@ -47,45 +96,81 @@
 <script>
 if (API.token()) location.href = "/app/dashboard.html";
 
-let pendingEmail = "";
+let pendingResetEmail = "";
 
-async function sendCode() {
-  const email = document.getElementById("email").value.trim();
-  if (!email) return showToast("أدخل بريدك الإلكتروني", "error");
-  const btn = document.getElementById("sendBtn");
-  btn.disabled = true; btn.textContent = "...";
-  try {
-    await API.req("/auth/request-code", { method: "POST", body: JSON.stringify({ email }) });
-    pendingEmail = email;
-    document.getElementById("stepEmail").style.display = "none";
-    document.getElementById("stepCode").style.display = "block";
-    showToast("تم إرسال الرمز، تحقق من بريدك", "success");
-  } catch (e) {
-    showToast(e.message, "error");
-  } finally {
-    btn.disabled = false; btn.textContent = "إرسال رمز الدخول";
-  }
+function showView(name) {
+  ["login", "register", "forgot", "reset"].forEach(v => {
+    document.getElementById("view" + v[0].toUpperCase() + v.slice(1)).style.display = v === name ? "block" : "none";
+  });
 }
 
-async function verifyCode() {
-  const code = document.getElementById("code").value.trim();
-  if (!code) return showToast("أدخل الرمز", "error");
-  const btn = document.getElementById("verifyBtn");
+async function doLogin() {
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  if (!email || !password) return showToast("أدخل البريد وكلمة السر", "error");
+  const btn = document.getElementById("loginBtn");
   btn.disabled = true; btn.textContent = "...";
   try {
-    const result = await API.req("/auth/verify-code", { method: "POST", body: JSON.stringify({ email: pendingEmail, code }) });
+    const result = await API.req("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
     API.setToken(result.token);
     location.href = "/app/dashboard.html";
   } catch (e) {
     showToast(e.message, "error");
   } finally {
-    btn.disabled = false; btn.textContent = "تأكيد ودخول";
+    btn.disabled = false; btn.textContent = "دخول";
   }
 }
 
-function backToEmail() {
-  document.getElementById("stepCode").style.display = "none";
-  document.getElementById("stepEmail").style.display = "block";
+async function doRegister() {
+  const email = document.getElementById("regEmail").value.trim();
+  const password = document.getElementById("regPassword").value;
+  if (!email || !password) return showToast("أدخل البريد وكلمة السر", "error");
+  const btn = document.getElementById("regBtn");
+  btn.disabled = true; btn.textContent = "...";
+  try {
+    const result = await API.req("/auth/register", { method: "POST", body: JSON.stringify({ email, password }) });
+    API.setToken(result.token);
+    location.href = "/app/dashboard.html";
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "إنشاء الحساب";
+  }
+}
+
+async function doForgot() {
+  const email = document.getElementById("forgotEmail").value.trim();
+  if (!email) return showToast("أدخل بريدك الإلكتروني", "error");
+  const btn = document.getElementById("forgotBtn");
+  btn.disabled = true; btn.textContent = "...";
+  try {
+    await API.req("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+    pendingResetEmail = email;
+    showToast("تحقق من بريدك للحصول على الرمز", "success");
+    showView("reset");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "إرسال رمز الاستعادة";
+  }
+}
+
+async function doReset() {
+  const code = document.getElementById("resetCode").value.trim();
+  const new_password = document.getElementById("resetPassword").value;
+  if (!code || !new_password) return showToast("أدخل الرمز وكلمة السر الجديدة", "error");
+  if (!pendingResetEmail) return showToast("ابدأ من خطوة استعادة كلمة السر أولاً", "error");
+  const btn = document.getElementById("resetBtn");
+  btn.disabled = true; btn.textContent = "...";
+  try {
+    await API.req("/auth/reset-password", { method: "POST", body: JSON.stringify({ email: pendingResetEmail, code, new_password }) });
+    showToast("تم تغيير كلمة السر، سجّل الدخول الآن", "success");
+    showView("login");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    btn.disabled = false; btn.textContent = "تغيير كلمة السر";
+  }
 }
 </script>
 </body>
