@@ -8,8 +8,10 @@ import dotenv from "dotenv";
 import GateApi from "gate-api";
 import fs from "fs";
 import path from "path";
+import http from "http";
 import { fileURLToPath } from "url";
 import * as autopilot from "./lib/autopilot.js";
+import * as priceStream from "./lib/priceStream.js";
 import * as paper from "./lib/portfolio.js";
 import * as strategy from "./lib/strategy.js";
 import * as risk from "./lib/riskManager.js";
@@ -515,4 +517,8 @@ autopilot.startLoop();
 
 // ===== تشغيل السيرفر =====
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));
+const httpServer = http.createServer(app);
+httpServer.on("upgrade", (req, socket, head) => {
+  priceStream.handleUpgrade(req, socket, head);
+});
+httpServer.listen(PORT, () => console.log(`🚀 Proxy يعمل على المنفذ ${PORT}`));

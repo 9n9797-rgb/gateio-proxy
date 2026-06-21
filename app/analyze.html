@@ -42,6 +42,7 @@ navBar("analyze");
 
 let chartInst = null;
 let lastData = null;
+let priceSocket = null;
 
 function quickPair(el, pair) {
   document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
@@ -61,11 +62,47 @@ async function analyze() {
     const data = await API.req(`/autopilot/analyze/${pair}`);
     lastData = data;
     render(data);
+    connectLivePrice(pair);
   } catch (e) {
     document.getElementById('content').innerHTML = `<div class="state">❌<br><br>${e.message}</div>`;
   } finally {
     btn.disabled = false; btn.textContent = 'تحليل';
   }
+}
+
+// بث لحظي للسعر عبر WebSocket (اتصال واحد بالخادم، يُعاد توزيعه من Gate.io)
+// بدل إعادة التحليل الكامل كل مرة — يُحدّث فقط السعر والتغيّر اليومي مباشرة.
+function connectLivePrice(pair) {
+  if (priceSocket) { priceSocket.close(); priceSocket = null; }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${location.host}/ws/price?symbol=${pair}&token=${encodeURIComponent(API.token() || '')}`;
+  const ws = new WebSocket(url);
+  priceSocket = ws;
+
+  ws.onopen = () => {
+    const dot = document.getElementById('liveDot');
+    if (dot) dot.style.background = '#3fb950';
+  };
+  ws.onclose = () => {
+    const dot = document.getElementById('liveDot');
+    if (dot) dot.style.background = '#444';
+  };
+  ws.onerror = () => {};
+  ws.onmessage = ev => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (_) { return; }
+    if (msg.pair !== pair) return;
+    const priceEl = document.getElementById('livePrice');
+    const changeEl = document.getElementById('liveChange');
+    const hlEl = document.getElementById('liveHighLow');
+    if (priceEl) priceEl.textContent = `$${formatNum(msg.price)}`;
+    if (changeEl) {
+      const sign = msg.change_1d_pct >= 0 ? '+' : '';
+      changeEl.textContent = `${sign}${msg.change_1d_pct}%`;
+      changeEl.className = `badge ${msg.change_1d_pct >= 0 ? 'badge-green' : 'badge-red'}`;
+    }
+    if (hlEl) hlEl.textContent = `H $${formatNum(msg.high)} / L $${formatNum(msg.low)}`;
+  };
 }
 
 function render(d) {
@@ -81,12 +118,12 @@ function render(d) {
   document.getElementById('content').innerHTML = `
     <div class="card flex-between" style="margin-bottom:14px">
       <div>
-        <div style="font-size:18px;font-weight:700;direction:ltr">${d.pair}</div>
-        <div style="font-size:26px;font-weight:700;direction:ltr">$${formatNum(d.price)}</div>
+        <div style="font-size:18px;font-weight:700;direction:ltr">${d.pair} <span id="liveDot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#444;margin-right:4px" title="بث لحظي"></span></div>
+        <div style="font-size:26px;font-weight:700;direction:ltr" id="livePrice">$${formatNum(d.price)}</div>
       </div>
       <div style="text-align:left">
-        <span class="badge ${changeClass}">${changeSign}${d.change_pct}%</span>
-        <div class="muted" style="font-size:11px;margin-top:6px;direction:ltr">H $${formatNum(d.high)} / L $${formatNum(d.low)}</div>
+        <span class="badge ${changeClass}" id="liveChange">${changeSign}${d.change_pct}%</span>
+        <div class="muted" style="font-size:11px;margin-top:6px;direction:ltr" id="liveHighLow">H $${formatNum(d.high)} / L $${formatNum(d.low)}</div>
       </div>
     </div>
 
