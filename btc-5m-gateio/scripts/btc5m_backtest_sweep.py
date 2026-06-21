@@ -49,6 +49,7 @@ def run_one(
     vol_mult: Optional[float],
     fee_pct_roundtrip: float,
     trend_ema: Optional[list[Optional[float]]],
+    reversal: bool = False,
 ) -> dict[str, Any]:
     min_entry_seconds_left = period * min_entry_frac
     exit_before_sec = period * exit_before_frac
@@ -65,7 +66,8 @@ def run_one(
             threshold = start_price * move_min_pct / 100.0
             if abs(move) < threshold:
                 continue
-            side = "LONG" if move > 0 else "SHORT"
+            # momentum: bet the move continues. reversal: bet it snaps back.
+            side = ("LONG" if move > 0 else "SHORT") if not reversal else ("SHORT" if move > 0 else "LONG")
             if side == "SHORT" and not allow_short:
                 continue
             if vol_mult is not None:
@@ -107,6 +109,7 @@ def sweep_for_granularity(
     trend_options_minutes: list[Optional[int]],
     vol_options: list[Optional[float]],
     fee_options: list[float],
+    reversal: bool = False,
 ) -> list[dict[str, Any]]:
     idx_by_ts = {c["ts"]: i for i, c in enumerate(candles)}
     closes = [c["close"] for c in candles]
@@ -129,11 +132,12 @@ def sweep_for_granularity(
                     min_entry_frac=0.4333, exit_before_frac=0.0667,
                     allow_short=True, vol_mult=vol_mult,
                     fee_pct_roundtrip=fee, trend_ema=trend_ema,
+                    reversal=reversal,
                 )
                 results.append({
                     "period_min": period // 60, "pct_threshold": pct,
                     "trend_ema_min": trend_p, "vol_mult": vol_mult, "fee_pct": fee,
-                    "granularity_sec": unit_seconds,
+                    "granularity_sec": unit_seconds, "mode": "reversal" if reversal else "momentum",
                     **res,
                 })
     return results
@@ -154,15 +158,17 @@ def main() -> None:
 
     t0 = time.time()
     results = []
-    results += sweep_for_granularity(
-        candles_1m, 60, [300, 900, 1800], pct_thresholds,
-        [None, 60, 240], vol_options, fee_options,
-    )
-    results += sweep_for_granularity(
-        candles_5m, 300, [3600, 14400], pct_thresholds,
-        [None, 12, 48], vol_options, fee_options,  # 12*5m=1h, 48*5m=4h EMA
-    )
-    print(f"ran {len(results)} combinations in {time.time()-t0:.1f}s")
+    for reversal in (False, True):
+        results += sweep_for_granularity(
+            candles_1m, 60, [300, 900, 1800], pct_thresholds,
+            [None, 60, 240], vol_options, fee_options, reversal=reversal,
+        )
+        results += sweep_for_granularity(
+            candles_5m, 300, [3600, 14400], pct_thresholds,
+            [None, 12, 48], vol_options, fee_options,  # 12*5m=1h, 48*5m=4h EMA
+            reversal=reversal,
+        )
+    print(f"ran {len(results)} combinations (momentum + reversal) in {time.time()-t0:.1f}s")
 
     meaningful = [r for r in results if r["entries"] >= 30]
     meaningful.sort(key=lambda r: r["total_pnl_pct"], reverse=True)
@@ -170,7 +176,7 @@ def main() -> None:
     print("\n=== TOP 15 by net total PnL% (entries >= 30) ===")
     for r in meaningful[:15]:
         print(
-            f"period={r['period_min']:>4}m  pct={r['pct_threshold']:.2f}%  "
+            f"[{r['mode']:8s}] period={r['period_min']:>4}m  pct={r['pct_threshold']:.2f}%  "
             f"trend_ema={r['trend_ema_min']}  vol_mult={r['vol_mult']}  fee={r['fee_pct']}%  "
             f"entries={r['entries']:4d}  win_rate={r['win_rate']}  "
             f"net_pnl={r['total_pnl_pct']:+.3f}%  avg/trade={r['avg_pnl_pct_per_trade']}"
@@ -179,7 +185,7 @@ def main() -> None:
     print("\n=== BOTTOM 5 (worst) for contrast ===")
     for r in meaningful[-5:]:
         print(
-            f"period={r['period_min']:>4}m  pct={r['pct_threshold']:.2f}%  "
+            f"[{r['mode']:8s}] period={r['period_min']:>4}m  pct={r['pct_threshold']:.2f}%  "
             f"trend_ema={r['trend_ema_min']}  vol_mult={r['vol_mult']}  fee={r['fee_pct']}%  "
             f"entries={r['entries']:4d}  win_rate={r['win_rate']}  "
             f"net_pnl={r['total_pnl_pct']:+.3f}%  avg/trade={r['avg_pnl_pct_per_trade']}"
