@@ -83,6 +83,22 @@ def avg_volume(candles_1m: list[dict[str, Any]], idx_by_ts: dict[int, int], ts: 
     return sum(c["base_volume"] for c in window) / len(window)
 
 
+def ema_series(closes: list[float], period: int) -> list[Optional[float]]:
+    k = 2.0 / (period + 1)
+    out: list[Optional[float]] = []
+    ema = None
+    for i, px in enumerate(closes):
+        if i < period - 1:
+            out.append(None)
+            continue
+        if ema is None:
+            ema = sum(closes[i - period + 1:i + 1]) / period
+        else:
+            ema = px * k + ema * (1 - k)
+        out.append(ema)
+    return out
+
+
 def run_backtest(
     buckets: dict[int, list[dict[str, Any]]],
     candles_1m: list[dict[str, Any]],
@@ -92,10 +108,17 @@ def run_backtest(
     exit_before_sec: int,
     allow_short: bool,
     vol_mult: Optional[float],
+    fee_pct_roundtrip: float = 0.0,
+    trend_ema_period: Optional[int] = None,
 ) -> dict[str, Any]:
     idx_by_ts = {c["ts"]: i for i, c in enumerate(candles_1m)}
     trades = []
     no_entry = 0
+
+    trend_ema = None
+    if trend_ema_period is not None:
+        closes = [c["close"] for c in candles_1m]
+        trend_ema = ema_series(closes, trend_ema_period)
 
     for bucket_start, cs in sorted(buckets.items()):
         start_price = cs[0]["open"]
@@ -116,8 +139,19 @@ def run_backtest(
                 avgv = avg_volume(candles_1m, idx_by_ts, c["ts"])
                 if avgv is None or avgv <= 0 or c["base_volume"] < avgv * vol_mult:
                     continue
+            if trend_ema is not None:
+                i = idx_by_ts.get(c["ts"])
+                ema_val = trend_ema[i] if i is not None else None
+                if ema_val is None:
+                    continue
+                # only trade in the direction of the higher-timeframe trend
+                if side == "LONG" and price_now < ema_val:
+                    continue
+                if side == "SHORT" and price_now > ema_val:
+                    continue
             exit_price = cs[-1]["close"]
             pnl_pct = ((exit_price - price_now) / price_now) if side == "LONG" else ((price_now - exit_price) / price_now)
+            pnl_pct -= fee_pct_roundtrip / 100.0
             trades.append({
                 "bucket": bucket_start, "side": side, "entry_price": price_now,
                 "exit_price": exit_price, "move_at_entry": move, "pnl_pct": pnl_pct,
@@ -151,6 +185,8 @@ def main() -> None:
     ap.add_argument("--exit-before-sec", type=int, default=20)
     ap.add_argument("--allow-short", action="store_true", help="simulate futures-style (both directions); default LONG-only like spot")
     ap.add_argument("--vol-mult", type=float, default=None, help="require entry candle volume >= this x the trailing 20-candle average")
+    ap.add_argument("--fee-pct-roundtrip", type=float, default=0.0, help="round-trip taker fee %% to subtract from every trade's pnl_pct (e.g. 0.1 for 0.1%%)")
+    ap.add_argument("--trend-ema-period", type=int, default=None, help="only take entries aligned with this EMA period (in 1m candles), e.g. 60 for a 1h trend filter")
     args = ap.parse_args()
 
     print(f"fetching {args.days} days of 1m candles for {args.currency_pair}...")
@@ -175,6 +211,8 @@ def main() -> None:
             buckets, candles, usd, pct,
             args.min_entry_seconds_left, args.exit_before_sec,
             args.allow_short, args.vol_mult,
+            fee_pct_roundtrip=args.fee_pct_roundtrip,
+            trend_ema_period=args.trend_ema_period,
         )
         report["scenarios"][name] = res
         print(f"{name:12s} entries={res['entries']:4d}  win_rate={res['win_rate']}  "
