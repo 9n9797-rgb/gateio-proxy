@@ -23,22 +23,26 @@ import requests
 GATEIO_REST = "https://api.gateio.ws/api/v4"
 
 
-def fetch_candles_1m(currency_pair: str, days: float) -> list[dict[str, Any]]:
+def fetch_candles(currency_pair: str, interval: str, interval_seconds: int, days: float) -> list[dict[str, Any]]:
+    """Gate.io enforces 'maximum 10000 points ago' per interval, so 1m history
+    only goes back ~6.9 days; longer lookbacks need a coarser native interval
+    (e.g. 5m covers ~34.7 days) rather than trying to aggregate from 1m."""
     now = int(time.time())
-    start = now - int(days * 86400)
+    max_lookback = interval_seconds * 9990
+    start = now - min(int(days * 86400), max_lookback)
     out: list[dict[str, Any]] = []
     cursor = start
     while cursor < now:
-        chunk_to = min(cursor + 999 * 60, now)
+        chunk_to = min(cursor + 999 * interval_seconds, now)
         r = requests.get(
             f"{GATEIO_REST}/spot/candlesticks",
-            params={"currency_pair": currency_pair, "interval": "1m", "from": cursor, "to": chunk_to},
+            params={"currency_pair": currency_pair, "interval": interval, "from": cursor, "to": chunk_to},
             timeout=10,
         )
         r.raise_for_status()
         rows = r.json()
         if not rows:
-            cursor = chunk_to + 60
+            cursor = chunk_to + interval_seconds
             continue
         for c in rows:
             out.append({
@@ -49,10 +53,9 @@ def fetch_candles_1m(currency_pair: str, days: float) -> list[dict[str, Any]]:
                 "open": float(c[5]),
                 "base_volume": float(c[6]),
             })
-        cursor = out[-1]["ts"] + 60
+        cursor = out[-1]["ts"] + interval_seconds
         time.sleep(0.05)
     out.sort(key=lambda x: x["ts"])
-    # de-dup by ts
     seen = set()
     dedup = []
     for c in out:
@@ -61,6 +64,10 @@ def fetch_candles_1m(currency_pair: str, days: float) -> list[dict[str, Any]]:
         seen.add(c["ts"])
         dedup.append(c)
     return dedup
+
+
+def fetch_candles_1m(currency_pair: str, days: float) -> list[dict[str, Any]]:
+    return fetch_candles(currency_pair, "1m", 60, days)
 
 
 def bucket_5m(ts: int) -> int:
