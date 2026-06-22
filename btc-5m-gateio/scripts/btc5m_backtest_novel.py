@@ -53,6 +53,7 @@ def squeeze_breakout_backtest(
     squeeze_pct: float,
     hold_units: int,
     fee_pct_roundtrip: float,
+    allow_short: bool = True,
 ) -> dict[str, Any]:
     """squeeze_pct: current BB width must be <= this fraction of the trailing
     squeeze_lookback average width to count as 'squeezed'. hold_units: how many
@@ -89,6 +90,9 @@ def squeeze_breakout_backtest(
         elif breakout_px < range_lo:
             side = "SHORT"
         else:
+            i += 1
+            continue
+        if side == "SHORT" and not allow_short:
             i += 1
             continue
         entry_price = breakout_px
